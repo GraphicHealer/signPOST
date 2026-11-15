@@ -1,3 +1,5 @@
+<p align="center"><img src="icon.png" width="200" alt="signPOST"></p>
+
 # signPOST
 
 REST-controlled digital signage firmware for the **Pimoroni Interstate 75 W

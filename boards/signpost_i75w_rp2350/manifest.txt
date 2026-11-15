@@ -1,0 +1,5 @@
+main.py
+gifdec.py
+images/*.png
+images/demo/*.png
+state.json

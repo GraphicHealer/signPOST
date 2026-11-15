@@ -1,0 +1,6 @@
+build/
+*.uf2
+__pycache__/
+*.pyc
+secrets.py
+state.json.bak

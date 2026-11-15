@@ -1,0 +1,78 @@
+name: Build UF2
+
+on:
+  workflow_dispatch:
+  release:
+    types: [created]
+
+env:
+  MICROPYTHON_REPO: https://github.com/micropython/micropython
+  MICROPYTHON_VERSION: master
+  PIMORONI_PICO_REPO: https://github.com/pimoroni/pimoroni-pico
+  PIMORONI_PICO_VERSION: feature/picovector2-and-layers
+  PY_DECL_VERSION: v0.0.3
+  DIR2UF2_VERSION: v0.0.9
+  BOARD: signpost_i75w_rp2350
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt update
+          sudo apt install -y cmake ninja-build gcc-arm-none-eabi \
+            libnewlib-arm-none-eabi build-essential ccache
+          python3 -m pip install littlefs-python==0.12.0
+
+      - name: Clone sources
+        run: |
+          git clone ${{ env.MICROPYTHON_REPO }} -b ${{ env.MICROPYTHON_VERSION }} micropython
+          cd micropython
+          git submodule update --init lib/pico-sdk lib/tinyusb lib/btstack \
+            lib/cyw43-driver lib/lwip lib/mbedtls lib/micropython-lib
+          cd ..
+          git clone ${{ env.PIMORONI_PICO_REPO }} -b ${{ env.PIMORONI_PICO_VERSION }} pimoroni-pico
+          cd pimoroni-pico && git submodule update --init && cd ..
+          mkdir -p tools
+          git clone https://github.com/gadgetoid/py_decl -b ${{ env.PY_DECL_VERSION }} tools/py_decl
+          git clone https://github.com/gadgetoid/dir2uf2 -b ${{ env.DIR2UF2_VERSION }} tools/dir2uf2
+
+      - name: Build mpy-cross
+        run: make -C micropython/mpy-cross -j"$(nproc)"
+
+      - name: Configure
+        run: |
+          cmake -S micropython/ports/rp2 -B build-${{ env.BOARD }} \
+            -DPICOTOOL_FORCE_FETCH_FROM_GIT=1 \
+            -DPICO_BUILD_DOCS=0 \
+            -DPICO_NO_COPRO_DIS=1 \
+            -DPICOTOOL_FETCH_FROM_GIT_PATH="$PWD/tools/picotool" \
+            -DPIMORONI_PICO_PATH="$PWD/pimoroni-pico" \
+            -DPIMORONI_TOOLS_DIR="$PWD/tools" \
+            -DUSER_C_MODULES="$PWD/boards/${{ env.BOARD }}/usermodules.cmake" \
+            -DMICROPY_BOARD_DIR="$PWD/boards/${{ env.BOARD }}" \
+            -DMICROPY_BOARD="${{ env.BOARD }}" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build-${{ env.BOARD }} -j"$(nproc)"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: signpost-uf2
+          path: |
+            build-${{ env.BOARD }}/firmware.uf2
+            build-${{ env.BOARD }}/firmware-with-filesystem.uf2
+
+      - name: Attach UF2s to release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build-${{ env.BOARD }}/firmware.uf2
+            build-${{ env.BOARD }}/firmware-with-filesystem.uf2

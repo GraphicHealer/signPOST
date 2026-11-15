@@ -16,17 +16,23 @@ albums, GIFs, slideshows, scrolling text, and a scheduled on/off window.
 3. On first boot the board starts an open AP **`signPOST-Setup`** —
    join it, open `http://192.168.4.1`, pick your WiFi, Connect.
 4. The board reboots onto your network, shows `signpost` / SSID / IP for
-   30 s, then starts the bundled demo slideshow.
-   The `demo` album is deleted automatically on your first upload.
+   30 s, then starts the built-in demo — procedurally drawn screens, so
+   it works at any panel size. Any real content (upload/show/clear)
+   retires it.
 
 ## What ships on the filesystem
 
 | File | Purpose |
 |---|---|
-| `main.py` | the whole sign app (server, display manager, tasks) |
-| `gifdec.py` | incremental GIF89a → PNG-frame decoder |
-| `images/demo/` | bundled demo album (title, welcome, API cheat-sheet, frames) — auto-deleted on first upload |
-| `state.json` | boot state: `demo` album slideshow @ 8 s — "BOOM, a sign" |
+| `main.py` | tiny launcher: imports `prealloc`, then `signpost` |
+| `prealloc.py` | display hardware + big buffers, allocated while the heap is clean |
+| `signpost.mpy` | the whole sign app (server, display manager, tasks), precompiled |
+| `gifdec.mpy` | incremental GIF89a → PNG-frame decoder, precompiled |
+| `state.json` | boot state: built-in procedural demo — "BOOM, a sign" |
+
+`signpost.py`/`gifdec.py` are the sources; builds compile them to `.mpy`
+with mpy-cross because on-device compile of the ~1900-line app churns the
+heap enough to starve the framebuffer/decoder allocations at boot.
 
 Not baked in (created at runtime): `secrets.py` (WiFi creds, saved by the
 portal), `schedule.json`, `bootcount`, `errors.log`, uploaded images.
@@ -35,15 +41,24 @@ portal), `schedule.json`, `bootcount`, `errors.log`, uploaded images.
 
 ```
 POST /api/show/<name>          show image, play album/gif, or one frame
-POST /api/slideshow            {"interval": 8, "album": "demo"}
+POST /api/slideshow            {"interval": 8}                          # all root images
 GET/PUT/DELETE /api/images/... upload, download, delete images/frames
 POST /api/text                 {"text": "HI", "scroll": true}
 GET/POST /api/schedule         on/off window, mode, show target, tz
 POST /api/clear  /api/random  /api/led  /api/reboot  /api/factory-reset
 ```
 
-Images must be exactly **128x128** PNG/JPEG; GIFs are stream-decoded to a
-hidden PNG-frame album and replayed at their saved frame rate.
+Images must match the configured display size (default **128x128** — see
+`GET /api/display`); GIFs are stream-decoded to a hidden PNG-frame album
+and replayed at their saved frame rate.
+
+Dev deploy (after editing `app/` sources):
+
+```bash
+mpy-cross app/signpost.py -o app/signpost.mpy
+mpy-cross app/gifdec.py -o app/gifdec.mpy
+mpremote cp app/main.py app/prealloc.py app/signpost.mpy app/gifdec.mpy :
+```
 
 Full reference: [API.md](API.md).
 

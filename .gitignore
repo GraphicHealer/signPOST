@@ -4,3 +4,4 @@ __pycache__/
 *.pyc
 secrets.py
 state.json.bak
+app/*.mpy

@@ -1,7 +1,6 @@
 main.py
-gifdec.py
+prealloc.py
+signpost.mpy
+gifdec.mpy
 state.json
 images
-images/*.png
-images/demo
-images/demo/*.png

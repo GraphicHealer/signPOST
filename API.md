@@ -138,8 +138,11 @@ curl -X POST -d '{"interval": 8, "album": "demo"}' http://signpost.local/api/sli
 Filenames must match `[A-Za-z0-9._-]{1,64}` (no slashes or `..`). Supported
 extensions: `.png`, `.jpg`, `.jpeg`, `.gif`. Max upload size: 512 KB.
 
-**All images and gifs must be exactly 128x128 pixels** — the board does no
-scaling. Uploads of other sizes are rejected (`400`). Scale first, e.g.:
+**All images and gifs must match the configured display size** — default
+128x128, see `GET /api/display`. The board does no scaling: uploads of other
+sizes are rejected (`400`), and stored content from a previous layout fails
+to display with `400 image is WxH but the display is AxB` until re-uploaded
+or the layout is changed back. Scale first, e.g.:
 `convert in.gif -resize 128x128^ -gravity center -extent 128x128 out.gif`
 
 Max upload size: **512 KB** for `.png`/`.jpg`, **4 MB** for `.gif` (the gif
@@ -166,7 +169,7 @@ curl http://signpost.local/api/images
 Upload an image or gif. Body is the raw file bytes, `Content-Length` required
 (chunked encoding is not supported). PNG/JPEG files are validated against the
 image decoder on save - corrupt files get a `400` and are not kept. Dimensions
-must be exactly 128x128.
+must match the configured display size or the upload is rejected (`400`).
 
 A `.gif` upload is decoded on-board into a hidden album of PNG frames (the
 original gif is not stored). It then behaves like an album under its gif

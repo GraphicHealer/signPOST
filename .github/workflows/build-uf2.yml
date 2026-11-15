@@ -45,6 +45,11 @@ jobs:
       - name: Build mpy-cross
         run: make -C micropython/mpy-cross -j"$(nproc)"
 
+      - name: Precompile app modules
+        run: |
+          micropython/mpy-cross/build/mpy-cross app/signpost.py -o app/signpost.mpy
+          micropython/mpy-cross/build/mpy-cross app/gifdec.py -o app/gifdec.mpy
+
       - name: Configure
         run: |
           cmake -S micropython/ports/rp2 -B build-${{ env.BOARD }} \

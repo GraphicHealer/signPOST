@@ -51,16 +51,17 @@ class GifDecoder:
     decoder's lifetime — construct it once at app start (while the heap is
     fresh) and call reset() for each new gif."""
 
-    def __init__(self, out_dir=None, width=128, height=128):
+    def __init__(self, out_dir=None, width=128, height=128, buffers=None):
         self.W, self.H = width, height
-        # fixed working buffers, allocated once
-        self.canvas = bytearray(width * height)
-        self.px = bytearray(width * height)
-        self.pngbuf = bytearray(8 + 25 + 780 + 12 + 2 + 5 +
-                                (1 + width) * height + 4 + 12)
-        self.pref = array("h", bytes(8192))   # LZW prefix chains (int16)
-        self.suff = bytearray(4096)           # LZW suffix bytes
-        self.stack = bytearray(4096)          # LZW string expansion stack
+        # fixed working buffers — caller may inject preallocated ones
+        buffers = buffers or {}
+        self.canvas = buffers.get("canvas") or bytearray(width * height)
+        self.px = buffers.get("px") or bytearray(width * height)
+        self.pngbuf = buffers.get("pngbuf") or bytearray(
+            8 + 25 + 780 + 12 + 2 + 5 + (1 + width) * height + 4 + 12)
+        self.pref = buffers.get("pref") or array("h", bytes(8192))
+        self.suff = buffers.get("suff") or bytearray(4096)
+        self.stack = buffers.get("stack") or bytearray(4096)
         # rare-case buffers, allocated lazily on first need
         self.scratch = None                   # deinterlace target
         self.undo = None                      # disposal-3 snapshot

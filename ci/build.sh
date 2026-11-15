@@ -25,6 +25,11 @@ python3 -m pip install --user littlefs-python==0.12.0 || true
 
 make -C micropython/mpy-cross -j"$(nproc)"
 
+# The app ships as .mpy: on-device compile of the ~1900-line app churns the
+# heap enough to break the large framebuffer/decoder allocations at boot.
+micropython/mpy-cross/build/mpy-cross "$PROJECT_ROOT/app/signpost.py" -o "$PROJECT_ROOT/app/signpost.mpy"
+micropython/mpy-cross/build/mpy-cross "$PROJECT_ROOT/app/gifdec.py" -o "$PROJECT_ROOT/app/gifdec.mpy"
+
 cmake -S micropython/ports/rp2 -B "build-$BOARD" \
     -DPICOTOOL_FORCE_FETCH_FROM_GIT=1 \
     -DPICO_BUILD_DOCS=0 \

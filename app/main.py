@@ -702,9 +702,9 @@ class DisplayManager:
             g.set_pen(board)
             g.rectangle(x0, y, fw, h)
             if left:
-                g.triangle(x0, y, x0, y + h, txp, y + h // 2)
+                g.triangle(x0 + 1, y, x0 + 1, y + h - 1, txp, y + h // 2)
             else:
-                g.triangle(xf, y, xf, y + h, txp, y + h // 2)
+                g.triangle(xf - 1, y, xf - 1, y + h - 1, txp, y + h // 2)
             g.set_pen(green)
             g.line(x0, y, xf, y)
             g.line(x0, y + h - 1, xf, y + h - 1)

@@ -656,14 +656,71 @@ class DisplayManager:
         self._spec({"t": "blank"})
 
     def status_message(self, line1, line2="", line3=""):
+        """Boot/status screen: the signPOST arrow logo on a post, with each
+        status line drawn as a small sign hanging off it."""
         g = self.graphics
+        brown = g.create_pen(150, 105, 60)
+        green = g.create_pen(90, 220, 140)
+        amber = g.create_pen(255, 210, 90)
+        board = g.create_pen(38, 50, 66)
+        g.set_font("bitmap8")
         g.set_pen(self.black)
         g.clear()
-        g.set_pen(self.white)
-        g.set_font("bitmap8")
-        g.text(line1, 2, self.height // 2 - 18, -1, 2)
-        g.text(line2, 2, self.height // 2 + 4, -1, 1)
-        g.text(line3, 2, self.height // 2 + 16, -1, 1)
+        cx = self.width // 2
+        # ground shadow behind the pole base, then pole + finial
+        g.set_pen(g.create_pen(30, 40, 52))
+        g.rectangle(cx - 16, 122, 32, 4)
+        g.set_pen(brown)
+        g.rectangle(cx - 3, 8, 6, 116)
+        g.circle(cx, 10, 4)
+
+        def sign(y, parts, h, left, centered=False):
+            pad, tip = 4, 9
+            tw = int(sum(g.measure_text(t, s)[0] for t, _, s in parts))
+            fw = pad + tw + pad
+            if centered:
+                x0 = cx - fw // 2
+            else:
+                x0 = cx - 5 - fw if left else cx + 5
+            xf = x0 + fw
+            txp = x0 - tip if left else xf + tip
+            if txp > self.width - 1 or txp < 0:
+                # too wide for its side: center the whole arrow, tip may clip
+                x0 = (self.width - fw - tip) // 2
+                xf = x0 + fw
+                txp = xf + tip if not left else x0 - tip
+            g.set_pen(board)
+            g.rectangle(x0, y, fw, h)
+            if left:
+                g.triangle(x0, y, x0, y + h, txp, y + h // 2)
+            else:
+                g.triangle(xf, y, xf, y + h, txp, y + h // 2)
+            g.set_pen(green)
+            g.line(x0, y, xf, y)
+            g.line(x0, y + h - 1, xf, y + h - 1)
+            if left:
+                g.line(xf, y, xf, y + h)
+                g.line(x0, y, txp, y + h // 2)
+                g.line(x0, y + h - 1, txp, y + h // 2)
+            else:
+                g.line(x0, y, x0, y + h)
+                g.line(xf, y, txp, y + h // 2)
+                g.line(xf, y + h - 1, txp, y + h // 2)
+            tx = x0 + pad
+            for t, pen, s in parts:
+                g.set_pen(pen)
+                g.text(t, int(tx), y + (h - 8 * s) // 2, -1, s)
+                tx += g.measure_text(t, s)[0]
+
+        # logo: centered board crossing the pole, tip pointing right
+        sign(20, [("sign", amber, 1), ("POST", green, 1)], 18, False, centered=True)
+        if line1:
+            s = 2 if g.measure_text(line1, 2)[0] <= 104 else 1
+            sign(50, [(line1, self.white, s)], 8 * s + 8, False)
+        if line2:
+            sign(80, [(line2, self.white, 1)], 14, True)
+        if line3:
+            sign(102, [(line3, self.white, 1)], 14, False)
         self.i75.update()
 
     async def _album_loop(self, path, interval_ms, loops, delays=None):
@@ -1507,7 +1564,7 @@ async def main():
     button_reset = False if boot_reset else _check_button_reset(dm)
     if boot_reset or button_reset:
         _factory_reset()
-        dm.status_message("WiFi reset", "credentials wiped")
+        dm.status_message("WiFi reset", "creds wiped")
 
     net = NetManager()
     server = RestServer(dm, net)
@@ -1524,7 +1581,7 @@ async def main():
         server.portal_mode = True
         net.start_ap()
         asyncio.create_task(_dns_task(server))
-        dm.status_message("SETUP MODE", "join " + AP_SSID, "open " + AP_IP)
+        dm.status_message("SETUP MODE", AP_SSID, AP_IP)
 
     srv = await asyncio.start_server(server.handle, "0.0.0.0", PORT)
     print("listening on port {} ({})".format(PORT, srv))

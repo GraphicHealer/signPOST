@@ -1773,9 +1773,9 @@ _MENU_TREE = [
     ("Slideshow", "slide"),
     ("Clear display", "clear"),
     ("Reset >", [
+        ("Back", "back"),          # safe option first - defaults the cursor
         ("Network reset", "cfm:net"),
         ("Factory reset", "cfm:full"),
-        ("Back", "back"),
     ]),
     ("Exit", "exit"),
 ]
@@ -1847,8 +1847,8 @@ class _Menu:
         elif act.startswith("cfm:"):
             kind = act[4:]
             title = "NETWORK RESET?" if kind == "net" else "FACTORY RESET?"
-            self._stack.append([[("Confirm", "do:" + kind),
-                                 ("Cancel", "back")], 0, title])
+            self._stack.append([[("Cancel", "back"),
+                                 ("Confirm", "do:" + kind)], 0, title])
             self._draw()
         elif act.startswith("do:"):
             self._reset(act[3:])

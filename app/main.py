@@ -50,6 +50,10 @@ Quick API tour (http://<board-ip>):
   GET    /api/scan                    scan for nearby WiFi networks
   POST   /api/connect                 {"ssid": "...", "password": "..."} save wifi & reboot
   GET    /setup                       wifi setup page (captive portal when in AP mode)
+  GET    /api/display                 panel layout + driver config
+  POST   /api/display                 {"display": "64x64"} or {"panel_w","panel_h","cols","rows"}
+                                      (+ "panel", "color_order", "stb_invert") — needs reboot
+  GET    /settings                    display settings page (layout preview)
   POST   /api/reboot                  reboot the board
   POST   /api/factory-reset           wipe wifi credentials & reboot into setup AP
 
@@ -72,16 +76,20 @@ import ntptime
 import pngdec
 import jpegdec
 
-from interstate75 import Interstate75, SWITCH_A, SWITCH_B, DISPLAY_INTERSTATE75_128X128
+import interstate75
+from interstate75 import Interstate75, SWITCH_A, SWITCH_B
 from ezwifi import EzWiFi
-from gifdec import GifDecoder, GifError, DISPLAY_W, DISPLAY_H
+from gifdec import GifDecoder, GifError
 
 # -- Configuration --------------------------------------------------------
 
-DISPLAY_TYPE = DISPLAY_INTERSTATE75_128X128
-PANEL_TYPE = Interstate75.PANEL_GENERIC       # try PANEL_FM6126A if the image is garbled
-STB_INVERT = False                            # try True if the image looks glitchy/inverted
-COLOR_ORDER = Interstate75.COLOR_ORDER_RGB    # try BGR etc. if colours look swapped
+DISPLAY_MODES = {n: getattr(interstate75, "DISPLAY_INTERSTATE75_" + n.upper())
+                 for n in ("32x32", "64x32", "96x32", "96x48", "64x64",
+                           "128x32", "128x64", "192x64", "256x64", "128x128")}
+PANEL_TYPES = {"generic": Interstate75.PANEL_GENERIC,     # try fm6126a if the image is garbled
+               "fm6126a": Interstate75.PANEL_FM6126A}
+COLOR_ORDERS = {n: getattr(Interstate75, "COLOR_ORDER_" + n.upper())
+                for n in ("rgb", "rbg", "grb", "gbr", "brg", "bgr")}
 PORT = 80
 
 IMG_DIR = "images"
@@ -94,6 +102,7 @@ BOOT_MESSAGE_S = 30         # how long the hostname/SSID/IP screen stays up
 
 STATE_FILE = "state.json"       # last display mode, resumed on boot
 SCHEDULE_FILE = "schedule.json" # optional on/off window for autonomous sign use
+DISPLAY_CFG_FILE = "display.json"  # panel layout / driver options, applied at boot
 MDNS_NAME = "signpost"         # -> http://signpost.local
 
 # WiFi setup / factory reset
@@ -162,6 +171,28 @@ def _gif_meta(gdir):
 _SCHEDULE_DEFAULTS = {"enabled": False, "on": "18:00", "off": "23:00",
                       "mode": "show", "show": "", "off_show": "",
                       "tz": 0, "interval": 8}
+
+
+def _load_display_config():
+    cfg = {"display": "128x128", "panel": "generic",
+           "color_order": "rgb", "stb_invert": False}
+    try:
+        with open(DISPLAY_CFG_FILE) as f:
+            cfg.update(json.loads(f.read()))
+    except (OSError, ValueError):
+        pass
+    if cfg["display"] not in DISPLAY_MODES:
+        cfg["display"] = "128x128"
+    if cfg["panel"] not in PANEL_TYPES:
+        cfg["panel"] = "generic"
+    if cfg["color_order"] not in COLOR_ORDERS:
+        cfg["color_order"] = "rgb"
+    return cfg
+
+
+def _save_display_config(cfg):
+    with open(DISPLAY_CFG_FILE, "w") as f:
+        f.write(json.dumps(cfg))
 
 
 def _load_schedule():
@@ -508,13 +539,19 @@ class DisplayManager:
     """Owns the HUB75 display state and any running animation task."""
 
     def __init__(self):
-        self.i75 = Interstate75(display=DISPLAY_TYPE, panel_type=PANEL_TYPE,
-                                stb_invert=STB_INVERT, color_order=COLOR_ORDER)
+        gc.collect()
+        cfg = _load_display_config()
+        self.layout = cfg["display"]
+        # decoder buffers (~66KB) allocated FIRST while the heap is still
+        # contiguous — reset() per upload, never reallocated
+        w, h = self.layout.split("x")
+        self.gifdec = GifDecoder(width=int(w), height=int(h))
+        self.i75 = Interstate75(display=DISPLAY_MODES[self.layout],
+                                panel_type=PANEL_TYPES[cfg["panel"]],
+                                stb_invert=bool(cfg["stb_invert"]),
+                                color_order=COLOR_ORDERS[cfg["color_order"]])
         self.graphics = self.i75.display
         self.width, self.height = self.graphics.get_bounds()
-        # decoder buffers (~66KB) allocated once at boot while the heap is
-        # still contiguous — reset() per upload, never reallocated
-        self.gifdec = GifDecoder()
         self.png = pngdec.PNG(self.graphics)
         self.jpeg = jpegdec.JPEG(self.graphics)
         self.black = self.graphics.create_pen(0, 0, 0)
@@ -923,6 +960,8 @@ class RestServer:
             # captive portal: every page (including OS connectivity checks)
             # returns the wifi setup page while in setup mode
             return 200, "text/html", _PORTAL_HTML
+        if segs == ["settings"]:
+            return 200, "text/html", _SETTINGS_HTML
         if not segs:
             return 200, "text/html", _INDEX_HTML
         return 404, "application/json", _json({"ok": False, "error": "try /api"})
@@ -1031,6 +1070,42 @@ class RestServer:
             _save_schedule(cfg)
             return 200, "application/json", _json({"ok": True, "schedule": cfg})
 
+        if cmd == "display":
+            if method == "GET":
+                cfg = _load_display_config()
+                cfg.update({"ok": True, "active": self.dm.layout,
+                            "width": self.dm.width, "height": self.dm.height,
+                            "layouts": sorted(DISPLAY_MODES)})
+                return 200, "application/json", _json(cfg)
+            if method != "POST":
+                raise HttpError(405, "use GET or POST")
+            params = await self._params(reader, query, headers)
+            cfg = _load_display_config()
+            for k in ("display", "panel", "color_order", "stb_invert"):
+                if k in params:
+                    cfg[k] = params[k]
+            # physical description -> resolved display constant
+            if all(k in params for k in ("panel_w", "panel_h", "cols", "rows")):
+                try:
+                    pw, ph = int(params["panel_w"]), int(params["panel_h"])
+                    cols, rows = int(params["cols"]), int(params["rows"])
+                except (TypeError, ValueError):
+                    raise HttpError(400, "panel/grid values must be integers")
+                cfg["display"] = "{}x{}".format(pw * cols, ph * rows)
+                cfg["phys"] = {"panel_w": pw, "panel_h": ph,
+                               "cols": cols, "rows": rows}
+            if cfg["display"] not in DISPLAY_MODES:
+                raise HttpError(400, "unsupported layout {} - canvas must be one of {}".format(
+                    cfg["display"], ", ".join(sorted(DISPLAY_MODES))))
+            if cfg["panel"] not in PANEL_TYPES:
+                raise HttpError(400, "panel must be generic|fm6126a")
+            if cfg["color_order"] not in COLOR_ORDERS:
+                raise HttpError(400, "color_order must be rgb|rbg|grb|gbr|brg|bgr")
+            cfg["stb_invert"] = cfg["stb_invert"] in (True, "true", "1", "on")
+            _save_display_config(cfg)
+            return 200, "application/json", _json(
+                {"ok": True, "display": cfg["display"], "reboot_required": True})
+
         raise HttpError(404, "unknown endpoint")
 
     async def _images(self, reader, method, segs, query, headers):
@@ -1137,10 +1212,10 @@ class RestServer:
         if not ok:
             _remove(path)
             raise HttpError(400, "not a valid PNG/JPEG file")
-        if wh != (DISPLAY_W, DISPLAY_H):
+        if wh != (self.dm.width, self.dm.height):
             _remove(path)
             raise HttpError(400, "image must be {}x{} (got {}x{})".format(
-                DISPLAY_W, DISPLAY_H, wh[0], wh[1]))
+                self.dm.width, self.dm.height, wh[0], wh[1]))
 
         await self._maybe_disable_demo(name)
         return 201, "application/json", _json({"ok": True, "name": name, "size": length})
@@ -1214,6 +1289,8 @@ class RestServer:
             "ip": ip,
             "portal_mode": self.portal_mode,
             "ap_active": bool(self.net.ap.active()),
+            "display": {"layout": self.dm.layout,
+                        "width": self.dm.width, "height": self.dm.height},
             "images": len(_list_images()),
             "free_bytes": _free_space(),
             "buttons": [self.dm.i75.switch_pressed(i) for i in range(Interstate75.NUM_SWITCHES)],
@@ -1307,7 +1384,7 @@ off-page <select id="schoffshow"></select>
 <button onclick="setschedule()">Save</button>
 </p>
 <div id="list"></div>
-<p><small><a href="/setup">wifi setup</a></small>
+<p><small><a href="/settings">settings</a> · <a href="/setup">wifi setup</a></small>
 <button onclick="reboot()">Reboot</button></p>
 <script>
 async function refresh(){
@@ -1366,6 +1443,81 @@ async function upload(){const f=document.getElementById('f').files[0];if(!f)retu
   const r=await fetch('/api/images/'+encodeURIComponent(f.name),{method:'PUT',body:f});
   alert(r.ok?'uploaded':'upload failed: '+(await r.text()));refresh()}
 refresh();
+</script></body></html>"""
+
+_SETTINGS_HTML = """<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>signPOST settings</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#181820;color:#eee;max-width:680px;margin:1em auto;padding:0 1em}
+button{background:#3a3a55;color:#eee;border:1px solid #555;border-radius:6px;padding:.4em .8em;margin:.2em;cursor:pointer}
+select,input{background:#22222e;color:#eee;border:1px solid #555;border-radius:6px;padding:.4em;margin:.2em}
+button:hover{background:#4a4a70}
+.card{background:#22222e;border-radius:8px;padding:.7em .9em;margin:.6em 0}
+small{opacity:.6}
+a{color:#9cf}
+#pv svg{max-width:100%;height:auto;background:#101014;border-radius:6px;display:block;margin:.4em 0}
+</style></head><body>
+<h1>signPOST settings</h1>
+<p><a href="/">&larr; back to sign</a></p>
+<div class="card">
+<b>Physical build</b><br>
+panel size
+<select id="pw" onchange="draw()">
+<option value="32x32">32&times;32</option>
+<option value="64x32">64&times;32</option>
+<option value="64x64">64&times;64</option>
+<option value="96x32">96&times;32</option>
+<option value="96x48">96&times;48</option>
+<option value="128x32">128&times;32</option>
+<option value="128x64" selected>128&times;64</option>
+</select>
+grid <input id="cols" type="number" value="1" min="1" max="8" style="width:3.5em" onchange="draw()">
+&times; <input id="rows" type="number" value="2" min="1" max="4" style="width:3.5em" onchange="draw()">
+<div id="pv"></div>
+<small id="pvmsg"></small><br>
+<small>Letters are ribbon-chain order: A is first (data in), row by row. Different
+panel sizes giving the same total canvas use the same display mode &mdash; the
+firmware only sees the chain, not panel boundaries.</small>
+</div>
+<div class="card">
+<b>Panel driver</b><br>
+type <select id="ptype"><option value="generic">generic</option>
+<option value="fm6126a">FM6126A</option></select>
+<small>garbled image? try FM6126A</small><br>
+color order <select id="cord"><option>rgb</option><option>rbg</option><option>grb</option>
+<option>gbr</option><option>brg</option><option>bgr</option></select>
+<small>swapped colours?</small><br>
+<label><input type="checkbox" id="stb"> stb_invert <small>glitchy/inverted output?</small></label>
+</div>
+<p><button onclick="save()">Save &amp; Reboot</button> <small id="msg"></small></p>
+<script>
+const L='ABCDEFGH';let VALID=new Set();
+function pv(i){return document.getElementById(i)}
+function phys(){const[pw,ph]=pv('pw').value.split('x').map(Number);
+  return{panel_w:pw,panel_h:ph,cols:+pv('cols').value,rows:+pv('rows').value}}
+function draw(){const{panel_w:pw,panel_h:ph,cols,rows}=phys();
+  const cw=pw*cols,ch=ph*rows,key=cw+'x'+ch,ok=VALID.has(key);
+  let s='<svg viewBox="0 0 '+cw+' '+ch+'" width="280">';
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){const i=r*cols+c,x=c*pw,y=r*ph;
+    s+='<rect x="'+(x+2)+'" y="'+(y+2)+'" width="'+(pw-4)+'" height="'+(ph-4)+'" rx="4" fill="#26323f" stroke="#5adc8c" stroke-width="3"/>';
+    s+='<text x="'+(x+pw/2)+'" y="'+(y+ph/2)+'" fill="#ffd75a" font-size="'+Math.min(pw,ph)/2.4+'" font-family="monospace" font-weight="bold" text-anchor="middle" dominant-baseline="middle">'+L[i]+'</text>'}
+  pv('pv').innerHTML=s+'</svg>';
+  pv('pvmsg').innerHTML=ok?'canvas '+cw+'&times;'+ch+' &rarr; uses display mode <b>'+key+'</b>'
+    :'canvas '+cw+'&times;'+ch+' &mdash; <b>not a supported layout</b>'}
+async function save(){const b=phys();b.panel=pv('ptype').value;b.color_order=pv('cord').value;
+  b.stb_invert=pv('stb').checked;
+  const j=await(await fetch('/api/display',{method:'POST',body:JSON.stringify(b)})).json();
+  if(!j.ok){pv('msg').textContent='error: '+(j.error||'failed');return}
+  await fetch('/api/reboot',{method:'POST'});
+  pv('msg').textContent='saved — rebooting, back in ~15s'}
+(async()=>{const c=await(await fetch('/api/display')).json();
+  VALID=new Set(c.layouts);pv('ptype').value=c.panel;pv('cord').value=c.color_order;
+  pv('stb').checked=!!c.stb_invert;
+  if(c.phys){pv('pw').value=c.phys.panel_w+'x'+c.phys.panel_h;
+    pv('cols').value=c.phys.cols;pv('rows').value=c.phys.rows}
+  draw()})();
 </script></body></html>"""
 
 _PORTAL_HTML = """<!DOCTYPE html>
@@ -1641,4 +1793,8 @@ async def _boot_then_restore(dm):
         await dm.clear()
 
 
-asyncio.run(main())
+try:
+    asyncio.run(main())
+except Exception as _e:
+    _log_exc(_e)
+    raise

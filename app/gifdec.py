@@ -1,7 +1,7 @@
 """gifdec.py — incremental GIF89a decoder for the Interstate75 REST display.
 
 Decodes a GIF stream fed in arbitrary chunks, composites each frame onto a
-DISPLAY_W x DISPLAY_H palette-index canvas, and writes each composited frame
+self.W x self.H palette-index canvas, and writes each composited frame
 as fNNN.png — an indexed-color PNG using zlib "stored" (uncompressed)
 deflate blocks, since the firmware ships no compressor. Runs on both
 MicroPython and CPython (struct/array/binascii only).
@@ -19,12 +19,8 @@ import gc
 import struct
 from array import array
 
-DISPLAY_W = 128
-DISPLAY_H = 128
-
 # PNG layout: sig(8) + IHDR(4+4+13+4) + PLTE(4+4+768+4) + IDAT(4+4+zlib+4) + IEND(12)
 # zlib = 2 hdr + 5 stored-block hdr + (1+W)*H raw rows + 4 adler
-_PNG_MAX = 8 + 25 + 780 + 12 + 2 + 5 + (1 + DISPLAY_W) * DISPLAY_H + 4 + 12
 _PNG_SIG = b"\x89PNG\r\n\x1a\n"
 
 
@@ -55,11 +51,13 @@ class GifDecoder:
     decoder's lifetime — construct it once at app start (while the heap is
     fresh) and call reset() for each new gif."""
 
-    def __init__(self, out_dir=None):
+    def __init__(self, out_dir=None, width=128, height=128):
+        self.W, self.H = width, height
         # fixed working buffers, allocated once
-        self.canvas = bytearray(DISPLAY_W * DISPLAY_H)
-        self.px = bytearray(DISPLAY_W * DISPLAY_H)
-        self.pngbuf = bytearray(_PNG_MAX)     # whole frame assembled in place
+        self.canvas = bytearray(width * height)
+        self.px = bytearray(width * height)
+        self.pngbuf = bytearray(8 + 25 + 780 + 12 + 2 + 5 +
+                                (1 + width) * height + 4 + 12)
         self.pref = array("h", bytes(8192))   # LZW prefix chains (int16)
         self.suff = bytearray(4096)           # LZW suffix bytes
         self.stack = bytearray(4096)          # LZW string expansion stack
@@ -137,11 +135,11 @@ class GifDecoder:
             if d is None:
                 return None
             self.width, self.height, packed, self.bg, _ = struct.unpack("<HHBBB", d)
-            if (self.width, self.height) != (DISPLAY_W, DISPLAY_H):
+            if (self.width, self.height) != (self.W, self.H):
                 raise GifError("gif must be {}x{} (got {}x{})".format(
-                    DISPLAY_W, DISPLAY_H, self.width, self.height))
+                    self.W, self.H, self.width, self.height))
             fill = self.bg
-            for i in range(DISPLAY_W * DISPLAY_H):
+            for i in range(self.W * self.H):
                 self.canvas[i] = fill
             self.stage = "gct" if packed & 0x80 else "block"
             self.gct_size = 2 << (packed & 7) if packed & 0x80 else 0
@@ -239,7 +237,7 @@ class GifDecoder:
             if not 2 <= min_code <= 8:
                 raise GifError("bad LZW min code")
             npix = self.img_w * self.img_h
-            if npix > DISPLAY_W * DISPLAY_H:
+            if npix > self.W * self.H:
                 raise GifError("frame too large")
             self.lzw_clear = 1 << min_code
             self.lzw_eoi = self.lzw_clear + 1
@@ -367,28 +365,28 @@ class GifDecoder:
         src = self.px
         if self.img_interlace:
             if self.scratch is None:
-                self.scratch = bytearray(DISPLAY_W * DISPLAY_H)
+                self.scratch = bytearray(self.W * self.H)
             _deinterlace(self.px, self.scratch, fw, fh)
             src = self.scratch
 
         disposal = self.gce_disposal
         if disposal == 3:
             if self.undo is None:
-                self.undo = bytearray(DISPLAY_W * DISPLAY_H)
+                self.undo = bytearray(self.W * self.H)
             self.undo[:] = self.canvas
 
         x, y = self.img_x, self.img_y
-        cw = min(fw, DISPLAY_W - x)
-        ch = min(fh, DISPLAY_H - y)
+        cw = min(fw, self.W - x)
+        ch = min(fh, self.H - y)
         tidx = self.gce_tidx
         if tidx < 0:
             for r in range(ch):
-                dst = (y + r) * DISPLAY_W + x
+                dst = (y + r) * self.W + x
                 self.canvas[dst:dst + cw] = src[r * fw:(r * fw) + cw]
         else:
             for r in range(ch):
                 base = r * fw
-                dbase = (y + r) * DISPLAY_W + x
+                dbase = (y + r) * self.W + x
                 for c in range(cw):
                     p = src[base + c]
                     if p != tidx:
@@ -408,7 +406,7 @@ class GifDecoder:
         # disposal of the frame just emitted, before the next one draws
         if disposal == 2:
             for r in range(ch):
-                dst = (y + r) * DISPLAY_W + x
+                dst = (y + r) * self.W + x
                 for c in range(cw):
                     self.canvas[dst + c] = self.bg
         elif disposal == 3:
@@ -434,7 +432,7 @@ class GifDecoder:
         at = o
         b[o:o + 4] = b"IHDR"
         o += 4
-        struct.pack_into(">IIBBBBB", b, o, DISPLAY_W, DISPLAY_H, 8, 3, 0, 0, 0)
+        struct.pack_into(">IIBBBBB", b, o, self.W, self.H, 8, 3, 0, 0, 0)
         o += 13
         struct.pack_into(">I", b, o, binascii.crc32(b[at:o]))
         o += 4
@@ -462,18 +460,18 @@ class GifDecoder:
         data_at = o
         b[o:o + 2] = b"\x78\x01"                # zlib: stored, no dict
         o += 2
-        raw_n = (1 + DISPLAY_W) * DISPLAY_H
+        raw_n = (1 + self.W) * self.H
         b[o] = 1                                # deflate: final stored block
         struct.pack_into("<HH", b, o + 1, raw_n, raw_n ^ 0xFFFF)
         o += 5
         raw_at = o
         canvas = self.canvas
-        for r in range(DISPLAY_H):
+        for r in range(self.H):
             b[o] = 0                            # filter: none
             o += 1
-            s = r * DISPLAY_W
-            b[o:o + DISPLAY_W] = canvas[s:s + DISPLAY_W]
-            o += DISPLAY_W
+            s = r * self.W
+            b[o:o + self.W] = canvas[s:s + self.W]
+            o += self.W
         struct.pack_into(">I", b, o, _adler32(memoryview(b)[raw_at:o]))
         o += 4
         struct.pack_into(">I", b, idat_len_at, o - data_at)

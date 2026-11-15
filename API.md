@@ -479,3 +479,33 @@ requests.post(f"{I75}/api/show", json={"image": "cat.png"})
 requests.post(f"{I75}/api/text", json={"text": "hello", "scale": 2})
 print(requests.get(f"{I75}/api/status").json())
 ```
+
+## Display settings
+
+`GET /api/display` returns the panel layout + driver config, the runtime
+`active` layout/dims, and the list of valid `layouts`.
+
+`POST /api/display` configures it (persisted in `display.json`, applied at
+boot — reboot required):
+
+```json
+{"display": "64x64"}
+```
+
+or describe the physical build and let the backend resolve the mode:
+
+```json
+{"panel_w": 64, "panel_h": 64, "cols": 2, "rows": 2}
+// -> 4x 64x64 in a 2x2 grid -> display "128x128"
+```
+
+Optional driver knobs: `"panel": "generic"|"fm6126a"`,
+`"color_order": "rgb"|"rbg"|"grb"|"gbr"|"brg"|"bgr"`, `"stb_invert": bool`.
+
+`GET /settings` serves a settings page with a live panel-layout preview.
+
+The HUB75 driver only sees one serial chain — panel boundaries are a
+physical/labeling concern; any tiling that produces a supported canvas
+size shares the same display mode. Chain order is row-major (A, B, C...
+left to right, top to bottom). Images and GIFs must match the active
+canvas size.

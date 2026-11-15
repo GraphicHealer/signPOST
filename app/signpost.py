@@ -1612,18 +1612,37 @@ scan();setInterval(scan,15000);
 # -- Entry point --------------------------------------------------------------
 
 
+_extra_tasks = []
+
+
+def _start_extras(dm, net):
+    """mDNS, schedule and button handlers — started once, on first connect."""
+    if not _extra_tasks:
+        _extra_tasks.append(asyncio.create_task(_schedule_task(dm)))
+        _extra_tasks.append(asyncio.create_task(_mdns_task(net)))
+        _extra_tasks.append(asyncio.create_task(_button_task(dm)))
+
+
+def _on_connected(dm, server, net):
+    """STA is up: kill the portal, banner for a bit, then restore + extras."""
+    net.stop_ap()
+    server.portal_mode = False
+    dm.mode = "boot"
+    dm.status_message(net.creds[0] if net.creds else "", net.wifi.ipv4())
+    asyncio.create_task(_boot_then_restore(dm))
+    _start_extras(dm, net)
+
+
 async def _wifi_watchdog(dm, server, net):
     """Keep retrying a saved network while the portal is up, and reconnect
     after drops when running normally."""
     while True:
         await asyncio.sleep(10)
         if not net.wifi.isconnected() and net.creds:
-            dm.status_message("WiFi lost", "reconnecting...")
+            if not server.portal_mode:
+                dm.status_message("WiFi lost", "reconnecting...")
             if await net.connect(retries=1):
-                net.stop_ap()
-                server.portal_mode = False
-                dm.status_message(net.creds[0] if net.creds else "",
-                                  net.wifi.ipv4())
+                _on_connected(dm, server, net)
 
 
 def _sync_time():
@@ -1794,11 +1813,7 @@ async def main():
     connected = False if (boot_reset or button_reset) else await _try_connect(dm, net)
 
     if connected:
-        server.portal_mode = False
-        dm.mode = "boot"
-        dm.status_message(net.creds[0] if net.creds else "",
-                          net.wifi.ipv4())
-        asyncio.create_task(_boot_then_restore(dm))
+        _on_connected(dm, server, net)
     else:
         server.portal_mode = True
         net.start_ap()
@@ -1810,9 +1825,7 @@ async def main():
     asyncio.create_task(_wifi_watchdog(dm, server, net))
     asyncio.create_task(_clear_bootcount_later())
     if connected:
-        asyncio.create_task(_schedule_task(dm))
-        asyncio.create_task(_mdns_task(net))
-        asyncio.create_task(_button_task(dm))
+        _start_extras(dm, net)
 
     while True:
         await asyncio.sleep(3600)

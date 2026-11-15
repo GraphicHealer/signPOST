@@ -684,7 +684,7 @@ class DisplayManager:
         g.rectangle(cx - 3, 8, 6, 116)
         g.circle(cx, 10, 4)
 
-        def sign(y, parts, h, left, centered=False):
+        def sign(y, parts, h, left=False, centered=False):
             pad, tip = 4, 9
             tw = int(sum(_text_w(g, t, s) for t, _, s in parts))
             fw = pad + tw + pad
@@ -723,14 +723,14 @@ class DisplayManager:
                 tx += _text_w(g, t, s)
 
         # logo: centered board crossing the pole, tip pointing right
-        sign(20, [("sign", amber, 1), ("POST", green, 1)], 18, False, centered=True)
+        sign(20, [("sign", amber, 1), ("POST", green, 1)], 18, centered=True)
         if line1:
             s = 2 if _text_w(g, line1, 2) <= 104 else 1
-            sign(50, [(line1, self.white, s)], 8 * s + 8, False)
+            sign(50, [(line1, self.white, s)], 8 * s + 8, centered=True)
         if line2:
-            sign(80, [(line2, self.white, 1)], 14, True)
+            sign(80, [(line2, self.white, 1)], 14, centered=True)
         if line3:
-            sign(102, [(line3, self.white, 1)], 14, False)
+            sign(102, [(line3, self.white, 1)], 14, centered=True)
         self.i75.update()
 
     async def _album_loop(self, path, interval_ms, loops, delays=None):

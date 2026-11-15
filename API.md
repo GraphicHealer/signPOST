@@ -395,7 +395,13 @@ curl -X POST http://signpost.local/api/factory-reset
 - **Boot banner** — on boot the matrix shows the board's IP for ~30s, then
   auto-clears (unless something was displayed in the meantime).
 - **Front buttons** — **A**: next root image. **B**: toggle the slideshow.
-- **mDNS** — the board answers to `demo.local`; prefer that over the
+  **Hold A+B ~2s** opens an on-screen menu (A cycles, B selects): next
+  image, slideshow, clear, a **Reset** submenu with network reset (wipes
+  WiFi creds, reboots into the setup portal) and factory reset (wipes
+  creds, state, schedule, display config and all images) — both ask to
+  confirm — and exit. The menu restores whatever was showing on exit or
+  after ~15s idle.
+- **mDNS** — the board answers to `signpost.local`; prefer that over the
   raw IP in clients (the IP can change across networks).
 - **NTP** — UTC is synced at boot and ~every 6h; needed by the schedule.
 

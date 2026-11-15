@@ -58,6 +58,8 @@ Quick API tour (http://<board-ip>):
   POST   /api/factory-reset           wipe wifi credentials & reboot into setup AP
 
 Front buttons: A = next root image, B = toggle slideshow.
+Hold A+B for ~2s to open the menu (A cycles, B selects): next image,
+slideshow, clear, Reset (network/factory, with confirm), Exit.
 """
 
 import os
@@ -373,6 +375,15 @@ def _write_bootcount(n):
 
 def _factory_reset():
     _remove(SECRETS_FILE)
+    _write_bootcount(0)
+
+
+def _full_factory_reset():
+    """Back to stock: creds, state, schedule, display config, all images."""
+    for f in (SECRETS_FILE, STATE_FILE, SCHEDULE_FILE, DISPLAY_CFG_FILE):
+        _remove(f)
+    if _is_dir(IMG_DIR):
+        _delete_entry(IMG_DIR)
     _write_bootcount(0)
 
 
@@ -1624,11 +1635,10 @@ _extra_tasks = []
 
 
 def _start_extras(dm, net):
-    """mDNS, schedule and button handlers — started once, on first connect."""
+    """mDNS and schedule — started once, on first connect."""
     if not _extra_tasks:
         _extra_tasks.append(asyncio.create_task(_schedule_task(dm)))
         _extra_tasks.append(asyncio.create_task(_mdns_task(net)))
-        _extra_tasks.append(asyncio.create_task(_button_task(dm)))
 
 
 def _on_connected(dm, server, net):
@@ -1753,18 +1763,174 @@ async def _mdns_task(net):
         await asyncio.sleep(0.05)
 
 
-async def _button_task(dm):
-    """Front buttons: A = next image, B = toggle slideshow (last config)."""
+# -- Button menu -------------------------------------------------------------
+
+_MENU_HOLD_MS = 2000        # A+B held this long opens the menu
+_MENU_TIMEOUT_MS = 15000    # idle menu exits itself
+
+_MENU_TREE = [
+    ("Next image", "next"),
+    ("Slideshow", "slide"),
+    ("Clear display", "clear"),
+    ("Reset >", [
+        ("Network reset", "cfm:net"),
+        ("Factory reset", "cfm:full"),
+        ("Back", "back"),
+    ]),
+    ("Exit", "exit"),
+]
+
+
+def _draw_menu(dm, title, items, sel):
+    g = dm.graphics
+    W, H = dm.width, dm.height
+    g.set_font("bitmap8")
+    g.set_pen(dm.black)
+    g.clear()
+    g.set_pen(dm.white)
+    g.text(title, int((W - _text_w(g, title, 1)) // 2), 3, -1, 1)
+    g.line(0, 13, W - 1, 13)
+    y = 18
+    for i, (label, _) in enumerate(items):
+        if i == sel:
+            g.set_pen(dm.white)
+            g.rectangle(0, y - 1, W, 11)
+            g.set_pen(dm.black)
+        else:
+            g.set_pen(dm.white)
+        g.text(label, 4, y, -1, 1)
+        y += 12
+    dm.i75.update()
+
+
+class _Menu:
+    """On-screen menu: hold A+B to open, A cycles, B selects. Destructive
+    entries confirm first; the menu restores whatever was on screen when it
+    exits (unless an action replaced the display or a reset reboots)."""
+
+    def __init__(self, dm, server):
+        self.dm = dm
+        self.server = server
+        self.active = False
+        self.last = time.ticks_ms()
+        self._stack = []
+
+    async def open(self):
+        await self.dm._stop_player()
+        self.active = True
+        self._stack = [[_MENU_TREE, 0, "MENU"]]
+        self.last = time.ticks_ms()
+        self._draw()
+
+    def _draw(self):
+        items, sel, title = self._stack[-1]
+        _draw_menu(self.dm, title, items, sel)
+
+    def move(self):
+        self.last = time.ticks_ms()
+        top = self._stack[-1]
+        top[1] = (top[1] + 1) % len(top[0])
+        self._draw()
+
+    async def select(self):
+        self.last = time.ticks_ms()
+        items, sel, title = self._stack[-1]
+        act = items[sel][1]
+        if isinstance(act, list):
+            self._stack.append([act, 0, items[sel][0].rstrip(" >").upper()])
+            self._draw()
+        elif act == "back":
+            self._stack.pop()
+            self._draw()
+        elif act == "exit":
+            await self.close()
+        elif act.startswith("cfm:"):
+            kind = act[4:]
+            title = "NETWORK RESET?" if kind == "net" else "FACTORY RESET?"
+            self._stack.append([[("Confirm", "do:" + kind),
+                                 ("Cancel", "back")], 0, title])
+            self._draw()
+        elif act.startswith("do:"):
+            self._reset(act[3:])
+        else:
+            await self.close(restore=False)
+            await self._action(act)
+
+    async def _leave(self):
+        """Put back whatever the menu covered: the setup screen while the
+        portal is up, otherwise the saved display state."""
+        if getattr(self.server, "portal_mode", False):
+            self.dm.status_message("SETUP MODE", AP_SSID, AP_IP)
+        else:
+            await _restore_state(self.dm)
+
+    async def close(self, restore=True):
+        self.active = False
+        if restore:
+            await self._leave()
+
+    def _reset(self, kind):
+        if kind == "net":
+            _factory_reset()
+            self.dm.status_message("Network reset", "rebooting...")
+        else:
+            _full_factory_reset()
+            self.dm.status_message("Factory reset", "rebooting...")
+        self.active = False
+        asyncio.create_task(_reboot_later())
+
+    async def _action(self, act):
+        try:
+            if act == "next":
+                await self.dm.show_next()
+            elif act == "slide":
+                if self.dm.mode == "slideshow":
+                    await self.dm.clear()
+                else:
+                    spec = self.dm.last_spec
+                    if spec.get("t") == "slideshow":
+                        await self.dm.slideshow(spec.get("interval", DEFAULT_SLIDESHOW_S),
+                                                spec.get("source"))
+                    else:
+                        await self.dm.slideshow(DEFAULT_SLIDESHOW_S)
+            elif act == "clear":
+                await self.dm.clear()
+        except (KeyError, ValueError, OSError):
+            await self._leave()
+
+
+async def _button_task(dm, server):
+    """Front buttons: A = next image, B = toggle slideshow (last config).
+    Hold A+B together to open the menu: A cycles, B selects."""
+    menu = _Menu(dm, server)
     prev = [False, False]
+    hold = 0
     while True:
         await asyncio.sleep(0.05)
-        for i, btn in enumerate((SWITCH_A, SWITCH_B)):
-            pressed = dm.i75.switch_pressed(btn)
-            if pressed and not prev[i]:
+        a = dm.i75.switch_pressed(SWITCH_A)
+        b = dm.i75.switch_pressed(SWITCH_B)
+        if menu.active:
+            if a and not prev[0]:
+                menu.move()
+            elif b and not prev[1]:
+                await menu.select()
+            elif time.ticks_diff(time.ticks_ms(), menu.last) > _MENU_TIMEOUT_MS:
+                await menu.close()
+        elif a and b:
+            hold += 50
+            if hold >= _MENU_HOLD_MS:
+                await menu.open()
+                hold = -1 << 30        # latched - ignore until both released
+        else:
+            hold = 0
+            if a and not prev[0]:
                 try:
-                    if btn == SWITCH_A:
-                        await dm.show_next()
-                    elif dm.mode == "slideshow":
+                    await dm.show_next()
+                except (KeyError, ValueError, OSError):
+                    pass
+            elif b and not prev[1]:
+                try:
+                    if dm.mode == "slideshow":
                         await dm.clear()
                     else:
                         spec = dm.last_spec
@@ -1775,7 +1941,7 @@ async def _button_task(dm):
                             await dm.slideshow(DEFAULT_SLIDESHOW_S)
                 except (KeyError, ValueError, OSError):
                     pass
-            prev[i] = pressed
+        prev[0], prev[1] = a, b
 
 
 async def _restore_state(dm):
@@ -1831,6 +1997,7 @@ async def main():
     srv = await asyncio.start_server(server.handle, "0.0.0.0", PORT)
     print("listening on port {} ({})".format(PORT, srv))
     asyncio.create_task(_wifi_watchdog(dm, server, net))
+    asyncio.create_task(_button_task(dm, server))   # also works in portal mode
     asyncio.create_task(_clear_bootcount_later())
     if connected:
         _start_extras(dm, net)

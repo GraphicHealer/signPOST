@@ -53,17 +53,17 @@ frame statically (`<album>/<frame>`). `<name>` is an image filename, album
 name, or gif name from `GET /api/images`.
 
 ```bash
-curl -X POST http://192.168.77.168/api/show/cat.png
+curl -X POST http://signpost.local/api/show/cat.png
 # {"ok": true, "showing": "cat.png", "mode": "image"}
 
-curl -X POST http://192.168.77.168/api/show/lightshow/frame_1.png
-# {"ok": true, "showing": "lightshow/frame_1.png", "mode": "image"}
+curl -X POST http://signpost.local/api/show/demo/frame_1.png
+# {"ok": true, "showing": "demo/frame_1.png", "mode": "image"}
 
-curl -X POST http://192.168.77.168/api/show/rickroll.gif
-# {"ok": true, "showing": "rickroll.gif", "mode": "gif"}
+curl -X POST http://signpost.local/api/show/anim.gif
+# {"ok": true, "showing": "anim.gif", "mode": "gif"}
 
-curl -X POST http://192.168.77.168/api/show/rickroll.gif/f010.png
-# {"ok": true, "showing": "rickroll.gif/f010.png", "mode": "image"}
+curl -X POST http://signpost.local/api/show/anim.gif/f010.png
+# {"ok": true, "showing": "anim.gif/f010.png", "mode": "image"}
 ```
 
 Gifs play at the frame rate saved from the source file unless `interval_ms`
@@ -84,9 +84,9 @@ Same thing with the name in the body. Body may be JSON or a bare image name.
 
 ```bash
 curl -X POST -d '{"image": "spin", "interval_ms": 30, "loops": 5}' \
-     http://192.168.77.168/api/show
+     http://signpost.local/api/show
 
-curl -X POST -d 'cat.png' http://192.168.77.168/api/show   # raw name also works
+curl -X POST -d 'cat.png' http://signpost.local/api/show   # raw name also works
 ```
 
 Also works via query params: `POST /api/show?image=cat.png`.
@@ -97,7 +97,7 @@ Stop any album/slideshow playback and blank the display.
 `/api/stop` is an alias. `DELETE` also accepted.
 
 ```bash
-curl -X POST http://192.168.77.168/api/clear
+curl -X POST http://signpost.local/api/clear
 # {"ok": true, "mode": "blank"}
 ```
 
@@ -107,7 +107,7 @@ Display a random image (files only, not albums). Returns `404` if the board
 has no images.
 
 ```bash
-curl -X POST http://192.168.77.168/api/random
+curl -X POST http://signpost.local/api/random
 # {"ok": true, "showing": "testcard.png"}
 ```
 
@@ -127,10 +127,10 @@ instead. Frame order is the sorted filename order (`frame_1.png`,
 | `album` / `folder` | string | — | limit rotation to this album or gif (404 if missing) |
 
 ```bash
-curl -X POST -d '{"interval": 10}' http://192.168.77.168/api/slideshow
-# or: curl -X POST 'http://192.168.77.168/api/slideshow?interval=10'
+curl -X POST -d '{"interval": 10}' http://signpost.local/api/slideshow
+# or: curl -X POST 'http://signpost.local/api/slideshow?interval=10'
 # just one album:
-curl -X POST -d '{"interval": 8, "album": "lightshow"}' http://192.168.77.168/api/slideshow
+curl -X POST -d '{"interval": 8, "album": "demo"}' http://signpost.local/api/slideshow
 ```
 
 ## Image management
@@ -150,14 +150,14 @@ body is stream-decoded to frames and never stored itself).
 List everything stored on the board.
 
 ```bash
-curl http://192.168.77.168/api/images
+curl http://signpost.local/api/images
 ```
 
 ```json
 {"ok": true, "images": [
   {"name": "cat.png", "type": "image", "size": 35778},
   {"name": "spin", "type": "album", "frames": 24},
-  {"name": "rickroll.gif", "type": "gif", "frames": 52}
+  {"name": "anim.gif", "type": "gif", "frames": 52}
 ]}
 ```
 
@@ -171,7 +171,7 @@ must be exactly 128x128.
 A `.gif` upload is decoded on-board into a hidden album of PNG frames (the
 original gif is not stored). It then behaves like an album under its gif
 name: `show` plays it at the frame rate saved from the file, frames are
-addressable as `<gif>/<frame>` (e.g. `rickroll.gif/f010.png`), and deleting
+addressable as `<gif>/<frame>` (e.g. `anim.gif/f010.png`), and deleting
 the gif name removes all frames. Decoding takes ~1-1.5s per frame, so a
 large gif upload can take a minute or more.
 
@@ -180,13 +180,13 @@ large gif upload can take a minute or more.
 | `?show=1` | display/play the upload immediately after it saves |
 
 ```bash
-curl -X PUT --data-binary @cat.png http://192.168.77.168/api/images/cat.png
+curl -X PUT --data-binary @cat.png http://signpost.local/api/images/cat.png
 # {"ok": true, "name": "cat.png", "size": 35778}            -> 201
 
-curl -X PUT --data-binary @anim.gif http://192.168.77.168/api/images/anim.gif
+curl -X PUT --data-binary @anim.gif http://signpost.local/api/images/anim.gif
 # {"ok": true, "name": "anim.gif", "type": "gif", "frames": 52} -> 201
 
-curl -X PUT --data-binary @cat.png "http://192.168.77.168/api/images/cat.png?show=1"
+curl -X PUT --data-binary @cat.png "http://signpost.local/api/images/cat.png?show=1"
 ```
 
 Gif note: frames are stored as uncompressed-block PNGs (~17 KB each), so a
@@ -198,11 +198,11 @@ Download the raw file (handy for web `<img>` tags / backups). For an album
 or gif, returns a JSON list of its frames instead.
 
 ```bash
-curl -O http://192.168.77.168/api/images/cat.png
-curl http://192.168.77.168/api/images/spin
+curl -O http://signpost.local/api/images/cat.png
+curl http://signpost.local/api/images/spin
 # {"ok": true, "name": "spin", "type": "album", "frames": ["f_001.png", ...]}
-curl http://192.168.77.168/api/images/rickroll.gif
-# {"ok": true, "name": "rickroll.gif", "type": "gif", "frames": ["f001.png", ...]}
+curl http://signpost.local/api/images/anim.gif
+# {"ok": true, "name": "anim.gif", "type": "gif", "frames": ["f001.png", ...]}
 ```
 
 ### `DELETE /api/images/<name>`
@@ -211,7 +211,7 @@ Delete an image, a gif, or an album **and all its frames**. If the deleted
 item is currently being displayed, the display is cleared.
 
 ```bash
-curl -X DELETE http://192.168.77.168/api/images/cat.png
+curl -X DELETE http://signpost.local/api/images/cat.png
 # {"ok": true, "deleted": "cat.png"}
 ```
 
@@ -231,14 +231,14 @@ Two ways to animate:
 Upload one frame; creates the album folder automatically.
 
 ```bash
-curl -X PUT --data-binary @frame_001.png http://192.168.77.168/api/images/spin/frame_001.png
-curl -X PUT --data-binary @frame_002.png http://192.168.77.168/api/images/spin/frame_002.png
+curl -X PUT --data-binary @frame_001.png http://signpost.local/api/images/spin/frame_001.png
+curl -X PUT --data-binary @frame_002.png http://signpost.local/api/images/spin/frame_002.png
 # ... frames play in filename-sorted order - zero-pad your numbers
 ```
 
 Play it with `POST /api/show/spin` (see `interval_ms`/`loops` above).
 `GET`/`DELETE`/`PUT` on a frame path work as you'd expect — for a gif use
-its public name too (`/api/images/rickroll.gif/f010.png`).
+its public name too (`/api/images/anim.gif/f010.png`).
 
 ## Text, LED, status
 
@@ -259,11 +259,11 @@ a marquee until something else is displayed.
 | `step` | int | `2` | pixels per scroll step |
 
 ```bash
-curl -X POST -d '{"text": "DINNER!", "scale": 2, "y": 56}' http://192.168.77.168/api/text
+curl -X POST -d '{"text": "DINNER!", "scale": 2, "y": 56}' http://signpost.local/api/text
 # overlay without clearing: {"text": "now", "clear": false, "x": 10, "y": 10}
 # scrolling announcement:
 curl -X POST -d '{"text": "Now playing: Jingle Bell Rock  ", "scroll": true, "scale": 1, "speed_ms": 60}' \
-     http://192.168.77.168/api/text
+     http://signpost.local/api/text
 ```
 
 ### `POST /api/led`
@@ -271,13 +271,13 @@ curl -X POST -d '{"text": "Now playing: Jingle Bell Rock  ", "scroll": true, "sc
 Set the onboard RGB LED (0-255 per channel).
 
 ```bash
-curl -X POST -d '{"r": 0, "g": 40, "b": 0}' http://192.168.77.168/api/led
+curl -X POST -d '{"r": 0, "g": 40, "b": 0}' http://signpost.local/api/led
 ```
 
 ### `GET /api/status`
 
 ```bash
-curl http://192.168.77.168/api/status
+curl http://signpost.local/api/status
 ```
 
 ```json
@@ -286,8 +286,8 @@ curl http://192.168.77.168/api/status
   "mode": "image",            // blank | boot | image | album | gif | slideshow | text
   "current": "cat.png",       // name being shown, or null
   "wifi_connected": true,
-  "ip": "192.168.77.168",
-  "mdns": "lightshow.local",  // the board also answers to this hostname
+  "ip": "signpost.local",
+  "mdns": "demo.local",  // the board also answers to this hostname
   "utc": "15:50",             // current UTC from NTP (absent until synced)
   "local": "10:50",           // UTC + the schedule's "tz" offset
   "portal_mode": false,       // true while serving the setup portal
@@ -301,13 +301,13 @@ curl http://192.168.77.168/api/status
 ## Schedule (autonomous on/off)
 
 The board syncs its clock over NTP and can switch the display between two
-targets at configured local times — e.g. play the `lightshow` album during
+targets at configured local times — e.g. play the `demo` album during
 evening hours and a static "show is off" image the rest of the day.
 
 ### `GET /api/schedule`
 
 ```bash
-curl http://192.168.77.168/api/schedule
+curl http://signpost.local/api/schedule
 ```
 
 ```json
@@ -336,8 +336,8 @@ The task only acts when the window *transitions* — manual `/api/show` calls
 in between are not fought, but get overridden at the next boundary.
 
 ```bash
-curl -X POST -d '{"enabled": true, "on": "18:00", "off": "23:00", "show": "lightshow", "off_show": "LightShow-off.png", "tz": -5, "interval": 8}' \
-     http://192.168.77.168/api/schedule
+curl -X POST -d '{"enabled": true, "on": "18:00", "off": "23:00", "show": "demo", "off_show": "LightShow-off.png", "tz": -5, "interval": 8}' \
+     http://signpost.local/api/schedule
 ```
 
 ## WiFi & system
@@ -347,7 +347,7 @@ curl -X POST -d '{"enabled": true, "on": "18:00", "off": "23:00", "show": "light
 Scan for nearby WiFi networks (used by the setup portal).
 
 ```bash
-curl http://192.168.77.168/api/scan
+curl http://signpost.local/api/scan
 # {"ok": true, "networks": [{"ssid": "HomeNet", "rssi": -42, "security": 5}, ...]}
 ```
 
@@ -358,7 +358,7 @@ Save WiFi credentials to `secrets.py` and reboot onto that network.
 
 ```bash
 curl -X POST -d '{"ssid": "HomeNet", "password": "hunter2"}' \
-     http://192.168.77.168/api/connect
+     http://signpost.local/api/connect
 # {"ok": true, "message": "credentials saved, rebooting"}
 ```
 
@@ -372,7 +372,7 @@ time - handy for reconfiguring WiFi without a factory reset.
 Reboot the board (~1.5s delay so the response can flush).
 
 ```bash
-curl -X POST http://192.168.77.168/api/reboot
+curl -X POST http://signpost.local/api/reboot
 ```
 
 ### `POST /api/factory-reset`
@@ -381,7 +381,7 @@ Delete `secrets.py` (WiFi credentials only - images are kept) and reboot
 into the `I75-Setup` access point.
 
 ```bash
-curl -X POST http://192.168.77.168/api/factory-reset
+curl -X POST http://signpost.local/api/factory-reset
 ```
 
 ## Board behaviour notes
@@ -392,7 +392,7 @@ curl -X POST http://192.168.77.168/api/factory-reset
 - **Boot banner** — on boot the matrix shows the board's IP for ~30s, then
   auto-clears (unless something was displayed in the meantime).
 - **Front buttons** — **A**: next root image. **B**: toggle the slideshow.
-- **mDNS** — the board answers to `lightshow.local`; prefer that over the
+- **mDNS** — the board answers to `demo.local`; prefer that over the
   raw IP in clients (the IP can change across networks).
 - **NTP** — UTC is synced at boot and ~every 6h; needed by the schedule.
 
@@ -418,32 +418,32 @@ Errors return `{"ok": false, "error": "..."}` with an HTTP status:
 ```yaml
 rest_command:
   i75_show:
-    url: "http://192.168.77.168/api/show/{{ image }}"
+    url: "http://signpost.local/api/show/{{ image }}"
     method: POST
   i75_clear:
-    url: "http://192.168.77.168/api/clear"
+    url: "http://signpost.local/api/clear"
     method: POST
   i75_random:
-    url: "http://192.168.77.168/api/random"
+    url: "http://signpost.local/api/random"
     method: POST
   i75_slideshow:
-    url: "http://192.168.77.168/api/slideshow"
+    url: "http://signpost.local/api/slideshow"
     method: POST
     content_type: application/json
     payload: '{"interval": {{ interval | default(5) }}}'
   i75_text:
-    url: "http://192.168.77.168/api/text"
+    url: "http://signpost.local/api/text"
     method: POST
     content_type: application/json
     payload: '{"text": "{{ text }}", "scale": {{ scale | default(1) }}}'
   i75_led:
-    url: "http://192.168.77.168/api/led"
+    url: "http://signpost.local/api/led"
     method: POST
     content_type: application/json
     payload: '{"r": {{ r | default(0) }}, "g": {{ g | default(0) }}, "b": {{ b | default(0) }}}'
 
 shell_command:
-  i75_upload: "curl -X PUT --data-binary @/config/www/i75/{{ image }} http://192.168.77.168/api/images/{{ image }}?show=1"
+  i75_upload: "curl -X PUT --data-binary @/config/www/i75/{{ image }} http://signpost.local/api/images/{{ image }}?show=1"
 ```
 
 REST sensor for status:
@@ -451,7 +451,7 @@ REST sensor for status:
 ```yaml
 sensor:
   - platform: rest
-    resource: http://192.168.77.168/api/status
+    resource: http://signpost.local/api/status
     name: "I75 Display"
     value_template: "{{ value_json.mode }} - {{ value_json.current or 'nothing' }}"
     scan_interval: 60
@@ -461,7 +461,7 @@ sensor:
 
 ```bash
 #!/bin/bash
-I75=192.168.77.168
+I75=signpost.local
 curl -X POST http://$I75/api/show/santa.png
 # later:
 curl -X POST http://$I75/api/clear
@@ -472,7 +472,7 @@ curl -X POST http://$I75/api/clear
 ```python
 import requests
 
-I75 = "http://192.168.77.168"
+I75 = "http://signpost.local"
 
 requests.put(f"{I75}/api/images/cat.png?show=1", data=open("cat.png", "rb"))
 requests.post(f"{I75}/api/show", json={"image": "cat.png"})

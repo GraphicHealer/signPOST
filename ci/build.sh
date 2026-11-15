@@ -14,10 +14,10 @@ BUILD_ROOT="$(realpath "${1:-$PROJECT_ROOT/build}")"
 mkdir -p "$BUILD_ROOT/tools" && cd "$BUILD_ROOT"
 
 [ -d micropython ] || git clone https://github.com/micropython/micropython -b "$MICROPYTHON_VERSION" micropython
-(cd micropython && git submodule update --init lib/pico-sdk lib/tinyusb lib/btstack lib/cyw43-driver lib/lwip lib/mbedtls lib/micropython-lib)
+(cd micropython && git submodule update --init --depth 1 lib/pico-sdk lib/tinyusb lib/btstack lib/cyw43-driver lib/lwip lib/mbedtls lib/micropython-lib)
 
 [ -d pimoroni-pico ] || git clone https://github.com/pimoroni/pimoroni-pico -b "$PIMORONI_PICO_VERSION" pimoroni-pico
-(cd pimoroni-pico && git submodule update --init)
+(cd pimoroni-pico && git submodule update --init --depth 1)
 
 [ -d tools/py_decl ] || git clone https://github.com/gadgetoid/py_decl -b "$PY_DECL_VERSION" tools/py_decl
 [ -d tools/dir2uf2 ] || git clone https://github.com/gadgetoid/dir2uf2 -b "$DIR2UF2_VERSION" tools/dir2uf2

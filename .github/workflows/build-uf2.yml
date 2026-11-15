@@ -31,11 +31,11 @@ jobs:
         run: |
           git clone ${{ env.MICROPYTHON_REPO }} -b ${{ env.MICROPYTHON_VERSION }} micropython
           cd micropython
-          git submodule update --init lib/pico-sdk lib/tinyusb lib/btstack \
-            lib/cyw43-driver lib/lwip lib/mbedtls lib/micropython-lib
+          git submodule update --init --depth 1 lib/pico-sdk lib/tinyusb \
+            lib/btstack lib/cyw43-driver lib/lwip lib/mbedtls lib/micropython-lib
           cd ..
           git clone ${{ env.PIMORONI_PICO_REPO }} -b ${{ env.PIMORONI_PICO_VERSION }} pimoroni-pico
-          cd pimoroni-pico && git submodule update --init && cd ..
+          cd pimoroni-pico && git submodule update --init --depth 1 && cd ..
           mkdir -p tools
           git clone https://github.com/gadgetoid/py_decl -b ${{ env.PY_DECL_VERSION }} tools/py_decl
           git clone https://github.com/gadgetoid/dir2uf2 -b ${{ env.DIR2UF2_VERSION }} tools/dir2uf2

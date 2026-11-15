@@ -1,5 +1,7 @@
 main.py
 gifdec.py
-images/*.png
-images/demo/*.png
 state.json
+images
+images/*.png
+images/demo
+images/demo/*.png

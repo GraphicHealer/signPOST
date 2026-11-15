@@ -1,7 +1,11 @@
 // Board and hardware specific configuration
-#define MICROPY_HW_BOARD_NAME                   "Interstate 75 W"
+#define MICROPY_HW_BOARD_NAME                   "signPOST"
 
+// May already arrive as a -D from mpconfigboard.cmake (needed at cmake level
+// so the linker script can size the littlefs region)
+#ifndef MICROPY_HW_FLASH_STORAGE_BYTES
 #define MICROPY_HW_FLASH_STORAGE_BYTES          (PICO_FLASH_SIZE_BYTES - (2 * 1024 * 1024))
+#endif
 
 // Set up networking.
 #define MICROPY_PY_NETWORK_HOSTNAME_DEFAULT     "I75W"

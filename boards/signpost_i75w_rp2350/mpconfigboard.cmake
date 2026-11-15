@@ -1,4 +1,10 @@
+set(PICO_PLATFORM "rp2350")
 set(PICO_BOARD "pico2_w")
+
+# Flash layout must reach the linker as cmake vars (the mpconfigboard.h
+# #defines only reach the compiler): 4MB total = 2MB firmware + 2MB littlefs.
+set(PICO_FLASH_SIZE_BYTES 4194304)
+set(MICROPY_HW_FLASH_STORAGE_BYTES 2097152)
 
 # Board specific version of the frozen manifest
 set(MICROPY_FROZEN_MANIFEST ${MICROPY_BOARD_DIR}/manifest.py)

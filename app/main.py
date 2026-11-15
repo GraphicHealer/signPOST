@@ -118,6 +118,16 @@ _REASONS = {
 # -- Filesystem helpers ---------------------------------------------------
 
 
+def _text_w(g, text, scale):
+    """measure_text() returns a (w, h) tuple on some picographics builds
+    and a bare int on others."""
+    w = g.measure_text(text, scale)
+    try:
+        return int(w)
+    except TypeError:
+        return int(w[0])
+
+
 def _is_image_name(name):
     n = name.lower()
     return any(n.endswith(e) for e in (".png", ".jpg", ".jpeg"))
@@ -634,7 +644,7 @@ class DisplayManager:
         step = max(int(params.get("step", 2)), 1)
         g.set_font("bitmap8")
         try:
-            w = g.measure_text(text, scale)[0]
+            w = _text_w(g, text, scale)
         except (AttributeError, TypeError):
             w = len(text) * 8 * scale
         while True:
@@ -676,7 +686,7 @@ class DisplayManager:
 
         def sign(y, parts, h, left, centered=False):
             pad, tip = 4, 9
-            tw = int(sum(g.measure_text(t, s)[0] for t, _, s in parts))
+            tw = int(sum(_text_w(g, t, s) for t, _, s in parts))
             fw = pad + tw + pad
             if centered:
                 x0 = cx - fw // 2
@@ -710,12 +720,12 @@ class DisplayManager:
             for t, pen, s in parts:
                 g.set_pen(pen)
                 g.text(t, int(tx), y + (h - 8 * s) // 2, -1, s)
-                tx += g.measure_text(t, s)[0]
+                tx += _text_w(g, t, s)
 
         # logo: centered board crossing the pole, tip pointing right
         sign(20, [("sign", amber, 1), ("POST", green, 1)], 18, False, centered=True)
         if line1:
-            s = 2 if g.measure_text(line1, 2)[0] <= 104 else 1
+            s = 2 if _text_w(g, line1, 2) <= 104 else 1
             sign(50, [(line1, self.white, s)], 8 * s + 8, False)
         if line2:
             sign(80, [(line2, self.white, 1)], 14, True)

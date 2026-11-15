@@ -1412,7 +1412,7 @@ async def _wifi_watchdog(dm, server, net):
             if await net.connect(retries=1):
                 net.stop_ap()
                 server.portal_mode = False
-                dm.status_message(MDNS_NAME, net.creds[0] if net.creds else "",
+                dm.status_message(net.creds[0] if net.creds else "",
                                   net.wifi.ipv4())
 
 
@@ -1584,7 +1584,7 @@ async def main():
     if connected:
         server.portal_mode = False
         dm.mode = "boot"
-        dm.status_message(MDNS_NAME, net.creds[0] if net.creds else "",
+        dm.status_message(net.creds[0] if net.creds else "",
                           net.wifi.ipv4())
         asyncio.create_task(_boot_then_restore(dm))
     else:

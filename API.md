@@ -34,6 +34,7 @@ and `OPTIONS` preflights return `204`.
 | PUT/POST | `/api/images/<name>` | Upload image/gif (`?show=1` displays it) |
 | GET | `/api/images/<name>` | Download image / list album or gif frames |
 | DELETE | `/api/images/<name>` | Delete image/gif/album |
+| POST | `/api/move` | Move an image between root and albums |
 | PUT/POST | `/api/images/<album>/<frame>` | Upload album or gif frame |
 | GET | `/api/images/<album>/<frame>` | Download album or gif frame |
 | DELETE | `/api/images/<album>/<frame>` | Delete album or gif frame |
@@ -216,6 +217,24 @@ item is currently being displayed, the display is cleared.
 ```bash
 curl -X DELETE http://signpost.local/api/images/cat.png
 # {"ok": true, "deleted": "cat.png"}
+```
+
+### `POST /api/move`
+
+Move an image file between the root library and albums. `to` is the
+destination: `""` = root, an album name, or a new album name (created on the
+fly). An album emptied by the move is removed. Moving the currently
+displayed image clears the display. Gif frame directories are managed -
+their frames can't be moved out.
+
+```bash
+curl -X POST -d '{"from": "cat.png", "to": "cats"}' \
+     http://signpost.local/api/move
+# {"ok": true, "moved": "cat.png", "to": "cats/cat.png"}
+
+curl -X POST -d '{"from": "cats/cat.png", "to": ""}' \
+     http://signpost.local/api/move
+# {"ok": true, "moved": "cats/cat.png", "to": "cat.png"}
 ```
 
 ## Albums & gifs (animations)

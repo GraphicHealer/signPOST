@@ -1133,6 +1133,13 @@ class RestServer:
             asyncio.create_task(_reboot_later())
             return 200, "application/json", _json({"ok": True, "message": "wifi credentials wiped, rebooting into setup mode"})
 
+        if cmd == "move":
+            if method != "POST":
+                raise HttpError(405, "use POST")
+            params = await self._params(reader, query, headers)
+            return await self._move(str(params.get("from", "")),
+                                    str(params.get("to", "")))
+
         if cmd == "schedule":
             if method == "GET":
                 return 200, "application/json", _json({"ok": True, "schedule": _load_schedule()})
@@ -1247,6 +1254,44 @@ class RestServer:
                 return 200, "application/json", _json({"ok": True, "deleted": frame})
 
         raise HttpError(404, "unknown endpoint")
+
+    async def _move(self, src, dst):
+        """Move an image between root and albums. Destination '' = root, an
+        existing album, or a new album name (created on the fly)."""
+        segs = src.split("/")
+        if len(segs) > 2 or not all(_valid_name(s) for s in segs):
+            raise HttpError(400, "bad source name")
+        if not _is_image_name(segs[-1]):
+            raise HttpError(400, "can only move image files")
+        if len(segs) == 2 and _is_gif_name(segs[0]):
+            raise HttpError(400, "gif frames are managed - delete and re-upload")
+        spath = IMG_DIR + "/" + src
+        if not _is_file(spath):
+            raise HttpError(404, "not found: " + src)
+        fname = segs[-1]
+        if not dst:
+            ddir = IMG_DIR
+        else:
+            if not _valid_name(dst) or _is_gif_name(dst):
+                raise HttpError(400, "bad destination name")
+            ddir = IMG_DIR + "/" + dst
+            if not _is_dir(ddir):
+                _ensure_dir(ddir)          # creates the album on the fly
+        dpath = ddir + "/" + fname
+        newname = dpath[len(IMG_DIR) + 1:]
+        if dpath == spath:
+            return 200, "application/json", _json({"ok": True, "moved": src, "to": newname})
+        if _is_file(dpath) or _is_dir(dpath):
+            raise HttpError(400, fname + " already exists at destination")
+        os.rename(spath, dpath)
+        if len(segs) == 2:                     # clean up a now-empty album
+            apath = IMG_DIR + "/" + segs[0]
+            if _is_dir(apath) and not os.listdir(apath):
+                _delete_entry(apath)
+        cur = self.dm.current
+        if cur and (cur == src or (len(segs) == 2 and cur == segs[0])):
+            await self.dm.clear()
+        return 200, "application/json", _json({"ok": True, "moved": src, "to": newname})
 
     async def _upload(self, reader, headers, path, name):
         is_gif = _is_gif_name(name)
@@ -1412,71 +1457,87 @@ _INDEX_HTML = """<!DOCTYPE html>
 <title>signPOST</title>
 <style>
 body{font-family:system-ui,sans-serif;background:#181820;color:#eee;max-width:680px;margin:1em auto;padding:0 1em}
-button{background:#3a3a55;color:#eee;border:1px solid #555;border-radius:6px;padding:.4em .8em;margin:.2em;cursor:pointer}
-select,input{background:#22222e;color:#eee;border:1px solid #555;border-radius:6px;padding:.4em;margin:.2em}
+button{background:#3a3a55;color:#eee;border:1px solid #555;border-radius:6px;padding:.4em .8em;margin:.15em;cursor:pointer}
+select,input{background:#22222e;color:#eee;border:1px solid #555;border-radius:6px;padding:.35em;margin:.15em}
 button:hover{background:#4a4a70}
-.card{display:flex;align-items:center;gap:.8em;background:#22222e;border-radius:8px;padding:.5em .8em;margin:.4em 0}
+.card{background:#22222e;border-radius:8px;padding:.6em .8em;margin:.6em 0}
+.item{display:flex;align-items:center;gap:.7em;background:#2a2a38;border-radius:6px;padding:.4em .6em;margin:.35em 0}
+.sub{margin-left:3em}
 img{width:48px;height:48px;image-rendering:pixelated;background:#000}
+img.sm{width:28px;height:28px}
 .nm{flex:1;word-break:break-all}
 small{opacity:.6}
 a{color:#9cf}
-#st{opacity:.8;font-size:.9em;margin:.6em 0}
+#st{opacity:.8;font-size:.9em;margin:.4em 0 .6em}
+h1{margin-bottom:.1em}
+.num{width:3.8em}
 </style></head><body>
 <h1>signPOST</h1>
 <div id="st">loading...</div>
-<p>
-<input type="file" id="f" accept=".png,.jpg,.jpeg">
-<button onclick="upload()">Upload</button>
-<button onclick="cmd('clear')">Clear</button>
+<div class="card"><b>Display</b><br>
 <button onclick="cmd('random')">Random</button>
+<button onclick="cmd('clear')">Clear</button>
+slideshow:
 <select id="ss"><option value="">all images</option></select>
-<input id="ssint" type="number" value="8" min="0.5" step="0.5" style="width:4.5em">
-<button onclick="slideshow()">Slideshow</button>
-</p>
-<p>
-UTC offset <input id="tz" type="number" step="1" min="-12" max="14" style="width:4.5em">
-<button onclick="settz()">Set TZ</button> <small id="tm"></small>
-</p>
-<p id="sched">
-Schedule <label><input type="checkbox" id="schen"> on</label>
-<input id="schon" value="18:00" style="width:4.5em">–<input id="schoff" value="23:00" style="width:4.5em">
-<select id="schmode"><option value="show">show</option><option value="slideshow">slideshow</option></select>
-<select id="schshow"><option value="">all images (root)</option></select>
-<input id="schint" type="number" value="8" min="0.5" step="0.5" style="width:3.5em">s
-off-page <select id="schoffshow"></select>
-<button onclick="setschedule()">Save</button>
-</p>
+every <input id="ssint" class="num" type="number" value="8" min="0.5" step="0.5">s
+<button onclick="slideshow()">Start</button>
+</div>
+<div class="card"><b>Upload</b><br>
+<input type="file" id="f" accept=".png,.jpg,.jpeg,.gif">
+to <select id="updst"><option value="">(root)</option></select>
+<button onclick="upload()">Upload</button>
+</div>
+<div class="card"><b>Library</b> <small id="li"></small>
 <div id="list"></div>
-<p><small><a href="/settings">settings</a> · <a href="/setup">wifi setup</a></small>
-<button onclick="reboot()">Reboot</button></p>
+</div>
+<div class="card" id="sched"><b>Schedule</b>
+<label><input type="checkbox" id="schen"> enabled</label><br>
+on <input id="schon" value="18:00" class="num"> &ndash; off <input id="schoff" value="23:00" class="num"><br>
+mode <select id="schmode"><option value="show">show</option><option value="slideshow">slideshow</option></select>
+<select id="schshow"><option value="">all images (root)</option></select>
+every <input id="schint" class="num" type="number" value="8" min="0.5" step="0.5">s<br>
+when off, show <select id="schoffshow"></select><br>
+<button onclick="setschedule()">Save</button> <small id="tm"></small>
+</div>
+<p><small><a href="/settings">settings</a> &middot; <a href="/setup">wifi setup</a> &middot;
+<a href="#" onclick="reboot();return false">reboot</a></small></p>
 <script>
+const E=encodeURIComponent,EP=p=>p.split('/').map(encodeURIComponent).join('/'),
+      expanded=new Set(),frames={};
+function btn(t,fn){const b=document.createElement('button');b.textContent=t;b.onclick=fn;return b}
 async function refresh(){
   const s=await (await fetch('/api/status')).json();
-  document.getElementById('st').textContent='mode: '+s.mode+(s.current?' / '+s.current:'')+' — '+s.images+' item(s), '+Math.round(s.free_bytes/1024)+'KB free';
-  document.getElementById('tm').textContent=s.local?('board time '+s.local):'';
+  document.getElementById('st').textContent='mode: '+s.mode+(s.current?' / '+s.current:'')+' — '+s.ip+' — '+Math.round(s.free_bytes/1024)+'KB free'+(s.local?' — board '+s.local:'');
   const sc=await (await fetch('/api/schedule')).json();
-  const tz=document.getElementById('tz');if(document.activeElement!==tz)tz.value=sc.schedule.tz;
   const l=await (await fetch('/api/images')).json();
   const el=document.getElementById('list');el.innerHTML='';
+  document.getElementById('li').textContent=l.images.length+' item(s)';
+  const albums=l.images.filter(i=>i.type==='album').map(i=>i.name);
   for(const i of l.images){
-    const d=document.createElement('div');d.className='card';
-    const prev=i.type==='image'?'<img src="/api/images/'+encodeURIComponent(i.name)+'">':'<img>';
-    d.innerHTML=prev+'<span class="nm">'+i.name+' <small>'+i.type+(i.size?' '+(i.size/1024).toFixed(1)+'KB':'')+(i.frames?' '+i.frames+'f':'')+'</small></span>';
-    const sh=document.createElement('button');sh.textContent='Show';sh.onclick=()=>cmd('show/'+encodeURIComponent(i.name));
-    const del=document.createElement('button');del.textContent='Del';del.onclick=async()=>{await fetch('/api/images/'+encodeURIComponent(i.name),{method:'DELETE'});refresh()};
-    d.append(sh,del);el.append(d);
+    const d=document.createElement('div');d.className='item';
+    d.innerHTML=(i.type==='image'?'<img src="/api/images/'+EP(i.name)+'">':'<img>')
+      +'<span class="nm">'+i.name+' <small>'+i.type
+      +(i.size?' '+(i.size/1024).toFixed(1)+'KB':'')+(i.frames?' '+i.frames+'f':'')+'</small></span>';
+    d.append(btn('Show',()=>cmd('show/'+EP(i.name))));
+    if(i.type==='image')d.append(moveSel(i.name,albums,true));
+    if(i.type==='album')d.append(expBtn(i.name));
+    d.append(btn('Del',async()=>{await fetch('/api/images/'+EP(i.name),{method:'DELETE'});refresh()}));
+    el.append(d);
+    if(i.type==='album'&&expanded.has(i.name))el.append(await frameRows(i.name,albums));
   }
-  const sel=document.getElementById('ss'),cur=sel.value;
-  const tgt=document.getElementById('schshow'),tcur=tgt.value;
-  const off=document.getElementById('schoffshow'),ocur=off.value;
+  const sel=document.getElementById('ss'),tgt=document.getElementById('schshow'),
+        off=document.getElementById('schoffshow'),up=document.getElementById('updst');
+  const cur=[sel.value,tgt.value,off.value,up.value];
   sel.innerHTML=tgt.innerHTML='<option value="">all images (root)</option>';
-  off.innerHTML='';
+  off.innerHTML='';up.innerHTML='<option value="">(root)</option>';
   for(const i of l.images){
     if(i.type==='album'||i.type==='gif'){
       for(const s of [sel,tgt]){const o=document.createElement('option');o.value=i.name;o.textContent=i.type+': '+i.name;s.append(o)}
+      if(i.type==='album'){const o=document.createElement('option');o.value=i.name;o.textContent='album: '+i.name;up.append(o)}
     }else{const o=document.createElement('option');o.value=i.name;o.textContent=i.name;off.append(o)}
   }
-  sel.value=cur;tgt.value=tcur;off.value=ocur;
+  {const o=document.createElement('option');o.value='__new__';o.textContent='+ new album';up.append(o)}
+  sel.value=cur[0];tgt.value=cur[1];off.value=cur[2];up.value=cur[3];
   const sp=document.getElementById('sched');
   if(!sp.contains(document.activeElement)){
     const c=sc.schedule;
@@ -1485,15 +1546,48 @@ async function refresh(){
     document.getElementById('schoff').value=c.off;
     document.getElementById('schmode').value=c.mode||'show';
     document.getElementById('schint').value=c.interval;
+    document.getElementById('tm').textContent=s.local?('board time '+s.local):'';
     tgt.value=c.show||'';off.value=c.off_show||'';
   }
 }
+function moveSel(from,albums,skipRoot){
+  const s=document.createElement('select');
+  s.innerHTML='<option value="">move…</option>';
+  if(!skipRoot){const o=document.createElement('option');o.value='';o.textContent='(root)';s.append(o)}
+  for(const a of albums){const o=document.createElement('option');o.value=a;o.textContent=a;s.append(o)}
+  const n=document.createElement('option');n.value='__new__';n.textContent='+ new album';s.append(n);
+  s.onchange=()=>mv(from,s);return s;
+}
+function expBtn(name){
+  const b=btn(expanded.has(name)?'▾ frames':'▸ frames',async()=>{
+    if(expanded.has(name))expanded.delete(name);else expanded.add(name);refresh()});return b}
+async function frameRows(name,albums){
+  if(!frames[name])frames[name]=(await (await fetch('/api/images/'+E(name))).json()).frames||[];
+  const w=document.createElement('div');
+  for(const f of frames[name]){
+    const d=document.createElement('div');d.className='item sub';
+    const path=name+'/'+f;
+    d.innerHTML='<img class="sm" src="/api/images/'+EP(path)+'"><span class="nm">'+f+'</span>';
+    d.append(btn('Show',()=>cmd('show/'+EP(path))));
+    d.append(moveSel(path,albums.filter(a=>a!==name),false));
+    d.append(btn('Del',async()=>{await fetch('/api/images/'+EP(path),{method:'DELETE'});delete frames[name];refresh()}));
+    w.append(d);
+  }
+  return w;
+}
+async function mv(from,sel){
+  let to=sel.value;
+  if(to==='__new__'){to=prompt('new album name:');if(!to){refresh();return}}
+  const r=await fetch('/api/move',{method:'POST',body:JSON.stringify({from:from,to:to})});
+  const j=await r.json();if(!j.ok)alert(j.error||'move failed');
+  for(const k in frames)delete frames[k];
+  refresh();
+}
+async function newAlbumIfNeeded(v){return v==='__new__'?(prompt('new album name:')||''):v}
 async function cmd(p){await fetch('/api/'+p,{method:'POST'});setTimeout(refresh,300)}
 async function slideshow(){const i=document.getElementById('ssint').value||'5';
-  const a=document.getElementById('ss').value,b={interval:+i};if(a)b.album=a;
+  const a=await newAlbumIfNeeded(document.getElementById('ss').value),b={interval:+i};if(a)b.album=a;
   await fetch('/api/slideshow',{method:'POST',body:JSON.stringify(b)});refresh()}
-async function settz(){const v=+document.getElementById('tz').value;
-  await fetch('/api/schedule',{method:'POST',body:JSON.stringify({tz:v})});refresh()}
 async function setschedule(){
   const b={enabled:document.getElementById('schen').checked,on:document.getElementById('schon').value,
     off:document.getElementById('schoff').value,mode:document.getElementById('schmode').value,
@@ -1502,8 +1596,12 @@ async function setschedule(){
   await fetch('/api/schedule',{method:'POST',body:JSON.stringify(b)});refresh()}
 async function reboot(){if(!confirm('reboot the board?'))return;
   await fetch('/api/reboot',{method:'POST'});alert('rebooting — back in ~15s')}
-async function upload(){const f=document.getElementById('f').files[0];if(!f)return alert('pick a file first');
-  const r=await fetch('/api/images/'+encodeURIComponent(f.name),{method:'PUT',body:f});
+async function upload(){
+  const f=document.getElementById('f').files[0];if(!f)return alert('pick a file first');
+  let dst=await newAlbumIfNeeded(document.getElementById('updst').value);
+  if(dst===null||dst===undefined)dst='';
+  const name=(dst?dst+'/':'')+f.name;
+  const r=await fetch('/api/images/'+EP(name),{method:'PUT',body:f});
   alert(r.ok?'uploaded':'upload failed: '+(await r.text()));refresh()}
 refresh();
 </script></body></html>"""
@@ -1555,6 +1653,12 @@ color order <select id="cord"><option>rgb</option><option>rbg</option><option>gr
 <label><input type="checkbox" id="stb"> stb_invert <small>glitchy/inverted output?</small></label>
 </div>
 <p><button onclick="save()">Save &amp; Reboot</button> <small id="msg"></small></p>
+<div class="card">
+<b>Time zone</b><br>
+UTC offset <input id="tz" type="number" step="1" min="-12" max="14" style="width:4.5em">
+<button onclick="savetz()">Save</button> <small id="tzmsg"></small><br>
+<small>applies immediately; used by the schedule and status clock</small>
+</div>
 <script>
 const L='ABCDEFGH';let VALID=new Set();
 function pv(i){return document.getElementById(i)}
@@ -1575,11 +1679,17 @@ async function save(){const b=phys();b.panel=pv('ptype').value;b.color_order=pv(
   if(!j.ok){pv('msg').textContent='error: '+(j.error||'failed');return}
   await fetch('/api/reboot',{method:'POST'});
   pv('msg').textContent='saved — rebooting, back in ~15s'}
+async function savetz(){
+  const j=await(await fetch('/api/schedule',{method:'POST',
+    body:JSON.stringify({tz:+pv('tz').value})})).json();
+  pv('tzmsg').textContent=j.ok?'saved':'error: '+(j.error||'failed')}
 (async()=>{const c=await(await fetch('/api/display')).json();
   VALID=new Set(c.layouts);pv('ptype').value=c.panel;pv('cord').value=c.color_order;
   pv('stb').checked=!!c.stb_invert;
   if(c.phys){pv('pw').value=c.phys.panel_w+'x'+c.phys.panel_h;
     pv('cols').value=c.phys.cols;pv('rows').value=c.phys.rows}
+  const s=await(await fetch('/api/schedule')).json();
+  pv('tz').value=s.schedule.tz;
   draw()})();
 </script></body></html>"""
 

@@ -17,6 +17,7 @@ albums, GIFs, slideshows, scrolling text, and a scheduled on/off window.
    join it, open `http://192.168.4.1`, pick your WiFi, Connect.
 4. The board reboots onto your network, shows `signpost` / SSID / IP for
    30 s, then starts the bundled demo slideshow.
+   The `demo` album is deleted automatically on your first upload.
 
 ## What ships on the filesystem
 
@@ -24,9 +25,8 @@ albums, GIFs, slideshows, scrolling text, and a scheduled on/off window.
 |---|---|
 | `main.py` | the whole sign app (server, display manager, tasks) |
 | `gifdec.py` | incremental GIF89a → PNG-frame decoder |
-| `images/*.png` | example signage (title, welcome, API cheat-sheet) |
-| `images/demo/` | example 3-frame album |
-| `state.json` | boot state: root slideshow @ 8 s — "BOOM, a sign" |
+| `images/demo/` | bundled demo album (title, welcome, API cheat-sheet, frames) — auto-deleted on first upload |
+| `state.json` | boot state: `demo` album slideshow @ 8 s — "BOOM, a sign" |
 
 Not baked in (created at runtime): `secrets.py` (WiFi creds, saved by the
 portal), `schedule.json`, `bootcount`, `errors.log`, uploaded images.

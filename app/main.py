@@ -45,7 +45,7 @@ Quick API tour (http://<board-ip>):
   GET    /api/status                  mode, current image, wifi, storage, buttons, mdns, utc
   GET    /api/schedule                read the on/off schedule config
   POST   /api/schedule                {"enabled": true, "on": "18:00", "off": "23:00",
-                                     "mode": "show", "show": "demo", "off_show": "signpost-title.png",
+                                     "mode": "show", "show": "demo", "off_show": "my-image.png",
                                      "tz": -5, "interval": 8}
   GET    /api/scan                    scan for nearby WiFi networks
   POST   /api/connect                 {"ssid": "...", "password": "..."} save wifi & reboot
@@ -1142,7 +1142,20 @@ class RestServer:
             raise HttpError(400, "image must be {}x{} (got {}x{})".format(
                 DISPLAY_W, DISPLAY_H, wh[0], wh[1]))
 
+        await self._maybe_disable_demo(name)
         return 201, "application/json", _json({"ok": True, "name": name, "size": length})
+
+    async def _maybe_disable_demo(self, name):
+        """The first real upload retires the baked 'demo' album. If the demo
+        was on screen, the new upload becomes the default display."""
+        demo = IMG_DIR + "/demo"
+        if name.startswith("demo/") or not _is_dir(demo):
+            return
+        _delete_entry(demo)
+        spec = self.dm.last_spec
+        if (spec.get("source") == "demo" or
+                str(spec.get("name", "")).startswith("demo/")):
+            await self.dm.show(name.split("/")[0])
 
     async def _upload_gif(self, reader, length, name):
         """Stream-decode an uploaded GIF into its hidden album of PNG frames."""
@@ -1186,6 +1199,7 @@ class RestServer:
         f = open(gdir + "/meta.json", "w")
         f.write(json.dumps(meta))
         f.close()
+        await self._maybe_disable_demo(name)
         return 201, "application/json", _json(
             {"ok": True, "name": name, "type": "gif", "frames": written})
 

@@ -757,11 +757,19 @@ class DisplayManager:
         g.circle(cx, 8, 4)
 
         def sign(y, parts, h):
-            pad, tip = 4, 9
+            tip, pad = 9, 4
             tw = int(sum(_text_w(g, t, s) for t, _, s in parts))
-            fw = pad + tw + pad
-            if fw + tip > W:
-                # too wide: fill edge to edge, drop the arrow tip
+            # signs are centered on the post, tip right - shrink padding
+            # then the tip until the centered sign actually fits
+            while (pad > 1 or tip > 3) and \
+                    cx + (tw + 2 * pad + 1) // 2 + tip > W - 1:
+                if pad > 1:
+                    pad -= 1
+                else:
+                    tip -= 1
+            fw = tw + 2 * pad
+            if cx + (fw + 1) // 2 + tip > W - 1:
+                # still too wide: fill edge to edge, drop the arrow tip
                 x0, xf, tip = 1, W - 1, 0
             else:
                 x0 = cx - fw // 2

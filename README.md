@@ -12,7 +12,7 @@ albums, GIFs, slideshows, scrolling text, and a scheduled on/off window.
 ## Flashing
 
 1. Hold BOOTSEL on the Interstate 75 W and plug in USB.
-2. Drop `firmware-with-filesystem.uf2` onto the `RP2350` drive.
+2. Drop `signPOST-<version>.uf2` from the latest release onto the `RP2350` drive.
 3. On first boot the board starts an open AP **`signPOST-Setup`** —
    join it, open `http://192.168.4.1`, pick your WiFi, Connect.
 4. The board reboots onto your network, shows `signpost` / SSID / IP for
@@ -64,8 +64,8 @@ Requires cmake, ninja, arm-none-eabi-gcc, python3 + `littlefs-python`:
 
 Outputs land in `build/build-signpost_i75w_rp2350/`:
 
-- `firmware.uf2` — MicroPython + frozen modules only
-- `firmware-with-filesystem.uf2` — the one you want: adds `app/` to littlefs
+- `firmware-with-filesystem.uf2` — the full image; releases rename it to `signPOST-<version>.uf2`
+- `firmware.uf2` — MicroPython + frozen modules only (no baked app/filesystem)
 
 ## Layout
 

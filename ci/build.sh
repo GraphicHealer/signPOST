@@ -40,5 +40,6 @@ cmake --build "build-$BOARD" -j"$(nproc)"
 
 echo ""
 echo "Done:"
-echo "  $BUILD_ROOT/build-$BOARD/firmware.uf2                   (firmware only)"
+cp "$BUILD_ROOT/build-$BOARD/firmware-with-filesystem.uf2" "$BUILD_ROOT/signPOST-dev.uf2"
+echo "  $BUILD_ROOT/signPOST-dev.uf2                            (release-style name)"
 echo "  $BUILD_ROOT/build-$BOARD/firmware-with-filesystem.uf2   (firmware + signPOST app)"

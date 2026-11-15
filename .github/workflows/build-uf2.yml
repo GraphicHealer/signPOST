@@ -63,18 +63,19 @@ jobs:
       - name: Build
         run: cmake --build build-${{ env.BOARD }} -j"$(nproc)"
 
+      - name: Rename release UF2
+        run: |
+          VER="${{ github.event.release.tag_name || 'dev' }}"
+          cp "build-${{ env.BOARD }}/firmware-with-filesystem.uf2" "signPOST-${VER}.uf2"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
           name: signpost-uf2
-          path: |
-            build-${{ env.BOARD }}/firmware.uf2
-            build-${{ env.BOARD }}/firmware-with-filesystem.uf2
+          path: signPOST-*.uf2
 
-      - name: Attach UF2s to release
+      - name: Attach UF2 to release
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            build-${{ env.BOARD }}/firmware.uf2
-            build-${{ env.BOARD }}/firmware-with-filesystem.uf2
+          files: signPOST-*.uf2

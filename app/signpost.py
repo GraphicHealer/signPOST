@@ -1517,9 +1517,15 @@ h1{margin:.2em 0 .5em}
   clip-path:polygon(0 0,calc(100% - .75em) 0,100% 50%,calc(100% - .75em) 100%,0 100%)}
 .flag i{font-style:normal;color:#ffd75a;position:relative}
 .flag b{color:#5adc8c;position:relative}
+.top{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.4em}
+nav a{color:#9cf;text-decoration:none;padding:.35em .7em;border:1px solid #555;
+  border-radius:6px;margin-left:.3em;white-space:nowrap}
+nav a:hover{background:#22222e}
 .num{width:3.8em}
 </style></head><body>
-<h1><span class="flag"><i>sign</i><b>POST</b></span></h1>
+<div class="top"><h1><span class="flag"><i>sign</i><b>POST</b></span></h1>
+<nav><a href="/settings">settings</a><a href="/setup">wifi setup</a>
+<a href="#" onclick="reboot();return false">reboot</a></nav></div>
 <div id="st">loading...</div>
 <div class="card"><b>Display</b><br>
 <button onclick="cmd('random')">Random</button>
@@ -1546,8 +1552,6 @@ every <input id="schint" class="num" type="number" value="8" min="0.5" step="0.5
 when off, show <select id="schoffshow"></select><br>
 <button onclick="setschedule()">Save</button> <small id="tm"></small>
 </div>
-<p><small><a href="/settings">settings</a> &middot; <a href="/setup">wifi setup</a> &middot;
-<a href="#" onclick="reboot();return false">reboot</a></small></p>
 <script>
 const E=encodeURIComponent,EP=p=>p.split('/').map(encodeURIComponent).join('/'),
       expanded=new Set(),frames={};

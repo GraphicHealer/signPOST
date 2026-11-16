@@ -1508,10 +1508,18 @@ img.sm{width:28px;height:28px}
 small{opacity:.6}
 a{color:#9cf}
 #st{opacity:.8;font-size:.9em;margin:.4em 0 .6em}
-h1{margin-bottom:.1em}
+h1{margin:.2em 0 .5em}
+.flag{display:inline-block;position:relative;padding:.16em .85em .16em .55em;
+  background:#5adc8c;font-family:ui-monospace,Menlo,monospace;font-weight:700;
+  letter-spacing:.05em;
+  clip-path:polygon(0 0,calc(100% - .75em) 0,100% 50%,calc(100% - .75em) 100%,0 100%)}
+.flag::before{content:"";position:absolute;inset:2px;background:#263242;
+  clip-path:polygon(0 0,calc(100% - .75em) 0,100% 50%,calc(100% - .75em) 100%,0 100%)}
+.flag i{font-style:normal;color:#ffd75a;position:relative}
+.flag b{color:#5adc8c;position:relative}
 .num{width:3.8em}
 </style></head><body>
-<h1>signPOST</h1>
+<h1><span class="flag"><i>sign</i><b>POST</b></span></h1>
 <div id="st">loading...</div>
 <div class="card"><b>Display</b><br>
 <button onclick="cmd('random')">Random</button>
@@ -1658,8 +1666,17 @@ button:hover{background:#4a4a70}
 small{opacity:.6}
 a{color:#9cf}
 #pv svg{max-width:100%;height:auto;background:#101014;border-radius:6px;display:block;margin:.4em 0}
+h1{margin:.2em 0 .5em}
+.flag{display:inline-block;position:relative;padding:.16em .85em .16em .55em;
+  background:#5adc8c;font-family:ui-monospace,Menlo,monospace;font-weight:700;
+  letter-spacing:.05em;
+  clip-path:polygon(0 0,calc(100% - .75em) 0,100% 50%,calc(100% - .75em) 100%,0 100%)}
+.flag::before{content:"";position:absolute;inset:2px;background:#263242;
+  clip-path:polygon(0 0,calc(100% - .75em) 0,100% 50%,calc(100% - .75em) 100%,0 100%)}
+.flag i{font-style:normal;color:#ffd75a;position:relative}
+.flag b{color:#5adc8c;position:relative}
 </style></head><body>
-<h1>signPOST settings</h1>
+<h1><span class="flag"><i>sign</i><b>POST</b></span> <small>settings</small></h1>
 <p><a href="/">&larr; back to sign</a></p>
 <div class="card">
 <b>Physical build</b><br>
@@ -1735,15 +1752,24 @@ async function savetz(){
 _PORTAL_HTML = """<!DOCTYPE html>
 <html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>I75 WiFi Setup</title>
+<title>signPOST wifi setup</title>
 <style>
 body{font-family:system-ui,sans-serif;background:#181820;color:#eee;max-width:420px;margin:2em auto;padding:0 1em}
 input,select{width:100%;box-sizing:border-box;padding:.6em;margin:.3em 0;background:#22222e;color:#eee;border:1px solid #555;border-radius:6px}
 button{width:100%;background:#3a6a3a;color:#eee;border:0;border-radius:6px;padding:.7em;font-size:1em;cursor:pointer}
 button:hover{background:#4a7a4a}
 #msg{margin-top:1em;opacity:.85}
+h1{margin:.2em 0 .5em}
+.flag{display:inline-block;position:relative;padding:.16em .85em .16em .55em;
+  background:#5adc8c;font-family:ui-monospace,Menlo,monospace;font-weight:700;
+  letter-spacing:.05em;
+  clip-path:polygon(0 0,calc(100% - .75em) 0,100% 50%,calc(100% - .75em) 100%,0 100%)}
+.flag::before{content:"";position:absolute;inset:2px;background:#263242;
+  clip-path:polygon(0 0,calc(100% - .75em) 0,100% 50%,calc(100% - .75em) 100%,0 100%)}
+.flag i{font-style:normal;color:#ffd75a;position:relative}
+.flag b{color:#5adc8c;position:relative}
 </style></head><body>
-<h1>I75 WiFi Setup</h1>
+<h1><span class="flag"><i>sign</i><b>POST</b></span> <small>wifi setup</small></h1>
 <select id="nets" onchange="document.getElementById('ssid').value=this.value">
 <option value="">scanning for networks...</option>
 </select>

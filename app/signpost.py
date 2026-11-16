@@ -71,6 +71,7 @@ import select
 import struct
 import time
 import asyncio
+from asyncio import core as _core
 
 import machine
 import network
@@ -95,6 +96,7 @@ MAX_GIF_BYTES = 4 * 1024 * 1024   # gif bodies are stream-decoded, never stored
 DEFAULT_ANIM_MS = 40        # frame delay when playing an album
 DEFAULT_SLIDESHOW_S = 5.0   # seconds per image in slideshow mode
 REQUEST_TIMEOUT_S = 300     # gif decode of a big upload can take a while
+KEEPALIVE_IDLE_S = 30       # max idle time held on a keep-alive connection
 BOOT_MESSAGE_S = 30         # how long the hostname/SSID/IP screen stays up
 
 STATE_FILE = "state.json"       # last display mode, resumed on boot
@@ -877,10 +879,12 @@ class DisplayManager:
                         break
                     cum += ms
                     i += 1
+                wait = cum - now
+                # always yield: a single-frame album hits i>=n immediately
+                # and would otherwise spin in _draw, starving the event loop
+                await asyncio.sleep(max(wait, 1) / 1000)
                 if i >= n:
                     break
-                wait = cum - now
-                await asyncio.sleep(max(wait, 1) / 1000)
             rounds += 1
 
     async def _slideshow_loop(self, interval_s, source):
@@ -917,19 +921,36 @@ class RestServer:
         self.dm = dm
         self.net = net
         self.portal_mode = False
+        self._consumed = {}   # id(reader) -> request-body bytes read
 
     async def handle(self, reader, writer):
         try:
-            await asyncio.wait_for(self._serve(reader, writer), REQUEST_TIMEOUT_S)
+            while True:
+                request = await asyncio.wait_for(
+                    self._read_request(reader), KEEPALIVE_IDLE_S)
+                if request is None:
+                    break
+                if not await asyncio.wait_for(
+                        self._serve(request, reader, writer),
+                        REQUEST_TIMEOUT_S):
+                    break
         except asyncio.TimeoutError:
             pass
         except Exception as e:  # noqa: BLE001 - never let one request kill the server
             _log_exc(e)
             try:
-                await self._send(writer, 500, _json({"ok": False, "error": "internal: {}".format(e)}))
-            except (OSError, RuntimeError):
+                await self._send(writer, 500, _json({"ok": False, "error": "internal: {}".format(e)}), False)
+            except Exception:                        # noqa: BLE001
                 pass
         finally:
+            # If this task died while registered in the asyncio io_queue
+            # (exception mid-read/write), its poll registration leaks and
+            # the reused fd later corrupts the queue - drop it explicitly.
+            try:
+                _core._io_queue.remove(_core.cur_task)
+            except Exception:                        # noqa: BLE001
+                pass
+            self._consumed.pop(id(reader), None)
             try:
                 await asyncio.sleep(0.1)   # let lwIP flush before FIN
                 writer.close()
@@ -937,19 +958,28 @@ class RestServer:
             except (OSError, AttributeError):
                 pass
 
-    async def _serve(self, reader, writer):
-        request = await self._read_request(reader)
-        if request is None:
-            return
-        method, target, headers = request
+    async def _serve(self, request, reader, writer):
+        method, target, headers, version = request
         if headers.get("expect", "").lower() == "100-continue":
             writer.write(b"HTTP/1.1 100 Continue\r\n\r\n")
             await writer.drain()
+        try:
+            cl = int(headers.get("content-length", "0"))
+        except ValueError:
+            cl = 0
         status, ctype, body = await self._route(reader, method, target, headers)
+        conn = headers.get("connection", "").lower()
+        keep = ((version == "HTTP/1.1" and conn != "close")
+                or conn == "keep-alive")
+        # an unread request body would poison the next request on this
+        # socket - drop keep-alive so the connection gets closed instead
+        if cl > self._consumed.get(id(reader), 0):
+            keep = False
         if isinstance(body, tuple):
-            await self._send_file(writer, status, body[1], ctype)
+            await self._send_file(writer, status, body[1], ctype, keep)
         else:
-            await self._send(writer, status, body, ctype)
+            await self._send(writer, status, body, ctype, keep)
+        return keep
 
     async def _read_request(self, reader):
         line = await reader.readline()
@@ -960,6 +990,7 @@ class RestServer:
         parts = line.decode().split()
         if len(parts) < 2:
             raise HttpError(400, "malformed request line")
+        version = parts[2] if len(parts) > 2 else "HTTP/0.9"
         headers = {}
         while True:
             hl = await reader.readline()
@@ -968,7 +999,7 @@ class RestServer:
             k, _, v = hl.decode().partition(":")
             if k:
                 headers[k.strip().lower()] = v.strip()
-        return parts[0].upper(), parts[1], headers
+        return parts[0].upper(), parts[1], headers, version
 
     async def _read_body(self, reader, headers, limit):
         if "chunked" in headers.get("transfer-encoding", "").lower():
@@ -989,6 +1020,7 @@ class RestServer:
             buf += chunk
         if len(buf) < length:
             raise HttpError(400, "incomplete body")
+        self._consumed[id(reader)] = self._consumed.get(id(reader), 0) + len(buf)
         return bytes(buf)
 
     async def _params(self, reader, query, headers):
@@ -1321,6 +1353,8 @@ class RestServer:
             remaining -= len(chunk)
         f.close()
 
+        self._consumed[id(reader)] = (self._consumed.get(id(reader), 0)
+                                      + length - remaining)
         if remaining:
             _remove(path)
             raise HttpError(400, "incomplete body")
@@ -1359,6 +1393,8 @@ class RestServer:
                 remaining -= len(chunk)
                 dec.feed(chunk)
             dec.feed(b"")
+            self._consumed[id(reader)] = (self._consumed.get(id(reader), 0)
+                                          + length - remaining)
         except GifError as e:
             _delete_entry(gdir)
             raise HttpError(400, "bad gif: {}".format(e))
@@ -1414,7 +1450,8 @@ class RestServer:
 
     # -- responses --
 
-    async def _send(self, writer, status, body=b"", ctype="application/json"):
+    async def _send(self, writer, status, body=b"", ctype="application/json",
+                    keep=False):
         if isinstance(body, str):
             body = body.encode()
         writer.write((
@@ -1424,21 +1461,23 @@ class RestServer:
             "Access-Control-Allow-Origin: *\r\n"
             "Access-Control-Allow-Methods: GET, PUT, POST, DELETE, OPTIONS\r\n"
             "Access-Control-Allow-Headers: Content-Type\r\n"
-            "Connection: close\r\n\r\n"
-        ).format(status, _REASONS.get(status, "OK"), ctype, len(body)).encode())
+            "Connection: {}\r\n\r\n"
+        ).format(status, _REASONS.get(status, "OK"), ctype, len(body),
+                 "keep-alive" if keep else "close").encode())
         if body:
             writer.write(body)
         await writer.drain()
 
-    async def _send_file(self, writer, status, path, ctype):
+    async def _send_file(self, writer, status, path, ctype, keep=False):
         size = _stat(path)[6]
         writer.write((
             "HTTP/1.1 {} {}\r\n"
             "Content-Type: {}\r\n"
             "Content-Length: {}\r\n"
             "Access-Control-Allow-Origin: *\r\n"
-            "Connection: close\r\n\r\n"
-        ).format(status, _REASONS.get(status, "OK"), ctype, size).encode())
+            "Connection: {}\r\n\r\n"
+        ).format(status, _REASONS.get(status, "OK"), ctype, size,
+                 "keep-alive" if keep else "close").encode())
         f = open(path, "rb")
         while True:
             chunk = f.read(2048)
@@ -2104,8 +2143,8 @@ async def main():
         asyncio.create_task(_dns_task(server))
         dm.status_message("SETUP MODE", AP_SSID, AP_IP)
 
-    srv = await asyncio.start_server(server.handle, "0.0.0.0", PORT)
-    print("listening on port {} ({})".format(PORT, srv))
+    asyncio.create_task(_serve_forever(server))
+    print("listening on port {}".format(PORT))
     asyncio.create_task(_wifi_watchdog(dm, server, net))
     asyncio.create_task(_button_task(dm, server))   # also works in portal mode
     asyncio.create_task(_clear_bootcount_later())
@@ -2114,6 +2153,18 @@ async def main():
 
     while True:
         await asyncio.sleep(3600)
+
+
+async def _serve_forever(server):
+    """Keep the HTTP listener alive: asyncio's accept task dies silently if
+    it raises (e.g. MemoryError creating a per-connection task during a
+    request burst) - log it and rebuild the listener instead."""
+    while True:
+        srv = await asyncio.start_server(server.handle, "0.0.0.0", PORT)
+        while not srv.task.done():
+            await asyncio.sleep(1)
+        _log_exc(RuntimeError("accept task ended"))   # dead listener
+        await asyncio.sleep(1)
 
 
 async def _try_connect(dm, net):
@@ -2137,8 +2188,23 @@ async def _boot_then_restore(dm):
         await dm.clear()
 
 
+def _loop_exc_handler(ctx):
+    """Surface silently-dying task exceptions to errors.log."""
+    try:
+        _log_exc(ctx.get("exception")
+                 or RuntimeError(str(ctx.get("message"))))
+    except Exception:
+        pass
+
+
+try:
+    _core.Loop.set_exception_handler(_loop_exc_handler)
+except Exception:
+    pass
+
 try:
     asyncio.run(main())
-except Exception as _e:
+    _log_exc(RuntimeError("asyncio.run returned cleanly"))
+except BaseException as _e:                         # noqa: BLE001
     _log_exc(_e)
     raise

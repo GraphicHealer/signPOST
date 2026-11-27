@@ -109,6 +109,8 @@ AP_SSID = "signPOST-Setup"
 AP_IP = "192.168.4.1"
 SECRETS_FILE = "secrets.py"
 BOOT_COUNT_FILE = "bootcount"
+DRAWFAIL_FILE = "drawfail"
+DRAW_FAIL_REBOOT_S = 60   # every _draw failing this long -> heap is spent; reboot
 RESET_BOOTS = 4             # power-cycles within the window that trigger a reset
 RESET_STABLE_S = 15         # uptime required for the boot counter to clear
 RESET_BUTTON = SWITCH_A     # front button held at power-on to trigger a reset
@@ -547,6 +549,7 @@ class DisplayManager:
         self.current = None
         self._player = None
         self.last_spec = {"t": "blank"}
+        self._draw_dead_since = None
 
     def _spec(self, spec):
         """Remember what is on screen so it can be restored after a reboot."""
@@ -587,6 +590,39 @@ class DisplayManager:
         self.graphics.set_pen(self.black)
         self.graphics.clear()
         self.i75.update()
+
+    def _draw_ok(self):
+        """A decode succeeded — the heap still works."""
+        self._draw_dead_since = None
+        _remove(DRAWFAIL_FILE)
+
+    def _draw_fail(self, err):
+        """Count sustained decode failure; reboot once it has run long enough
+        to be heap exhaustion rather than a bad file. First occurrence reboots
+        with the saved state intact (content resumes); if draws keep failing
+        straight after that reboot the content itself is bad, so the saved
+        state is blanked first — no reboot loop, and uptime is always past
+        RESET_STABLE_S so the boot counter can't factory-reset."""
+        now = time.ticks_ms()
+        if self._draw_dead_since is None:
+            self._draw_dead_since = now
+            _log_exc(RuntimeError("draw failing: {!r} mem_free={}".format(
+                err, gc.mem_free())))
+            return
+        if time.ticks_diff(now, self._draw_dead_since) < DRAW_FAIL_REBOOT_S * 1000:
+            return
+        _log_exc(RuntimeError("draw dead >{}s, mem_free={}".format(
+            DRAW_FAIL_REBOOT_S, gc.mem_free())))
+        if _is_file(DRAWFAIL_FILE):
+            _remove(DRAWFAIL_FILE)
+            self._spec({"t": "blank"})
+        else:
+            try:
+                with open(DRAWFAIL_FILE, "w") as f:
+                    f.write("1")
+            except OSError:
+                pass
+        asyncio.create_task(_reboot_later())
 
     async def _stop_player(self):
         if self._player is not None:
@@ -868,8 +904,10 @@ class DisplayManager:
             while i < n:
                 try:
                     self._draw(path + "/" + frames[i])
-                except Exception:       # noqa: BLE001 - a dead player kills the event loop
+                    self._draw_ok()
+                except Exception as e:  # noqa: BLE001 - a dead player kills the event loop
                     gc.collect()
+                    self._draw_fail(e)
                 cum += delays[i] if delays and i < n else interval_ms
                 i += 1
                 now = time.ticks_diff(time.ticks_ms(), base)
@@ -908,8 +946,10 @@ class DisplayManager:
                 try:
                     self._draw(IMG_DIR + "/" + name)
                     self.current = name
-                except Exception:       # noqa: BLE001 - a dead player kills the event loop
+                    self._draw_ok()
+                except Exception as e:  # noqa: BLE001 - a dead player kills the event loop
                     gc.collect()
+                    self._draw_fail(e)
                 await asyncio.sleep(interval_s)
 
 
@@ -1083,6 +1123,14 @@ class RestServer:
 
         if cmd == "status":
             return 200, "application/json", _json(self._status())
+
+        if cmd == "log":
+            try:
+                with open("errors.log") as f:
+                    body = f.read()
+            except OSError:
+                body = ""
+            return 200, "text/plain", body
 
         if cmd == "images":
             return await self._images(reader, method, segs[1:], query, headers)
@@ -1437,6 +1485,8 @@ class RestServer:
                         "width": self.dm.width, "height": self.dm.height},
             "images": len(_list_images()),
             "free_bytes": _free_space(),
+            "mem_free": gc.mem_free(),
+            "mem_alloc": gc.mem_alloc(),
             "buttons": [self.dm.i75.switch_pressed(i) for i in range(Interstate75.NUM_SWITCHES)],
         }
         if connected:

@@ -22,7 +22,8 @@ and `OPTIONS` preflights return `204`.
 | GET | `/` | Control UI (web page) |
 | GET | `/setup` | WiFi setup page |
 | GET | `/api` | Service info |
-| GET | `/api/status` | Board/display status |
+| GET | `/api/status` | Board/display status (incl. `mem_free`) |
+| GET | `/api/log` | `errors.log` contents (text/plain) |
 | POST | `/api/show/<name>` | Display image, play album/gif |
 | POST/PUT | `/api/show` | Same, name in body |
 | POST | `/api/clear` | Blank display, stop playback |

@@ -1871,12 +1871,18 @@ def _start_extras(dm, net):
 
 
 def _on_connected(dm, server, net):
-    """STA is up: kill the portal, banner for a bit, then restore + extras."""
+    """STA is up: kill the portal, banner for a bit, then restore + extras.
+    A drawfail marker means this boot came from the decode watchdog — skip
+    the SSID banner entirely and go straight back to the content."""
     net.stop_ap()
     server.portal_mode = False
-    dm.mode = "boot"
-    dm.status_message(net.creds[0] if net.creds else "", net.wifi.ipv4())
-    asyncio.create_task(_boot_then_restore(dm))
+    if _is_file(DRAWFAIL_FILE):
+        dm.mode = "restore"
+        asyncio.create_task(_restore_immediately(dm))
+    else:
+        dm.mode = "boot"
+        dm.status_message(net.creds[0] if net.creds else "", net.wifi.ipv4())
+        asyncio.create_task(_boot_then_restore(dm))
     _start_extras(dm, net)
 
 
@@ -2255,6 +2261,15 @@ async def _try_connect(dm, net):
     if not ok:
         dm.status_message("WiFi", "FAILED")
     return ok
+
+
+async def _restore_immediately(dm):
+    """Watchdog-reboot path: no banner, just put the saved content back."""
+    await asyncio.sleep(1)          # let the event loop settle
+    if dm.mode != "restore":        # an API call beat us to it
+        return
+    if not await _restore_state(dm):
+        await dm.clear()
 
 
 async def _boot_then_restore(dm):
